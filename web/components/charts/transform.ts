@@ -60,3 +60,19 @@ export function asNum(v: number | null | undefined, digits = 0): string {
   if (v === null || v === undefined) return "—";
   return v.toFixed(digits);
 }
+
+// Server Component から Client Component(チャート)へ関数 prop は渡せない(RSC 境界)。
+// 書式は直列化可能なトークンで受け渡し、整形はクライアント側でこのファクトリから得る。
+export type NumFmt = "percent" | "usd" | "num" | "raw";
+export function numFormatter(token: NumFmt = "raw"): (v: number) => string {
+  switch (token) {
+    case "percent":
+      return (v) => asPercent(v);
+    case "usd":
+      return (v) => asUsd(v);
+    case "num":
+      return (v) => asNum(v);
+    default:
+      return (v) => String(v);
+  }
+}

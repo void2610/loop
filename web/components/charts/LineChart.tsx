@@ -7,6 +7,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { numFormatter, type NumFmt } from "@/components/charts/transform";
 
 export type LinePoint = {
   x: string; // 表示ラベル(日付バケット等)
@@ -17,13 +18,13 @@ export type LinePoint = {
 type Props = {
   data: LinePoint[];
   max?: number;
-  yFormat?: (v: number) => string;
+  yFormat?: NumFmt;
   className?: string;
   height?: number;
 };
 
 export function LineChart({ data, max, yFormat, className, height = 180 }: Props) {
-  const fmt = yFormat ?? ((v: number) => String(v));
+  const fmt = numFormatter(yFormat);
   if (data.length === 0) {
     return <p className="text-sm text-muted-foreground">データなし</p>;
   }

@@ -142,7 +142,7 @@ export default async function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <BarChart data={passRateBars} max={1} format={(v) => asPercent(v)} />
+            <BarChart data={passRateBars} max={1} format="percent" />
           </CardContent>
         </Card>
 
@@ -155,7 +155,7 @@ export default async function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <LineChart data={passRateLine} max={1} yFormat={(v) => asPercent(v)} />
+            <LineChart data={passRateLine} max={1} yFormat="percent" />
           </CardContent>
         </Card>
 

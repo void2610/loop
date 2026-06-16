@@ -7,6 +7,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { numFormatter, type NumFmt } from "@/components/charts/transform";
 
 export type BarDatum = {
   label: string;
@@ -21,14 +22,14 @@ type Props = {
   data: BarDatum[];
   /** 値の最大(未指定なら data の最大値)。0..1 の率なら 1 を渡す。 */
   max?: number;
-  /** 値の表示整形(例: (v)=>`${(v*100).toFixed(0)}%`)。API は生値、整形はここ。 */
-  format?: (v: number) => string;
+  /** 値の表示整形トークン(API は生値、整形はここ。RSC 境界越えに関数を渡さない)。 */
+  format?: NumFmt;
   className?: string;
 };
 
 export function BarChart({ data, max, format, className }: Props) {
   const hi = max ?? Math.max(1, ...data.map((d) => d.value));
-  const fmt = format ?? ((v: number) => String(v));
+  const fmt = numFormatter(format);
   if (data.length === 0) {
     return <p className="text-sm text-muted-foreground">データなし</p>;
   }
