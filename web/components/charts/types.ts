@@ -1,10 +1,14 @@
 /**
  * 分析ダッシュボードの型(§5)。
  *
- * これらは webapp/api/stats.py の StatsEnvelope に対応するが、当該エンドポイントは
- * lib/api.ts(read-only)と OpenAPI 生成型(types.ts)に含まれないため、ここで契約形を明示する。
- * source/generated_at は「loop.db は MD 派生の使い捨てインデックス」を UI で明示するための注記。
+ * 行型は webapp/schemas.py を正本とする OpenAPI 生成型(@/lib/types)から導出する。
+ * 手書き二重定義はしない(型ドリフトは gen:types 再生成 + typecheck で検出)。
+ * 封筒(generated_at/source/has_more)は「loop.db は MD 派生の使い捨てインデックス」を
+ * UI で明示するための注記。
  */
+import type { components } from "@/lib/types";
+
+type Schemas = components["schemas"];
 
 export type StatsEnvelope<R> = {
   generated_at: string;
@@ -13,44 +17,8 @@ export type StatsEnvelope<R> = {
   has_more: boolean;
 };
 
-export type SummaryRow = {
-  total_runs: number;
-  reviewed: number;
-  unreviewed: number;
-  pass: number;
-  fail: number;
-  distinct_skills: number;
-};
-
-export type PassRateRow = {
-  skill_sha: string | null;
-  pass_rate: number | null;
-  avg_cost: number | null;
-  n: number;
-};
-
-export type VerdictSummaryRow = {
-  verdict: string | null;
-  n: number;
-  unreviewed: number;
-  avg_cost: number | null;
-  avg_turns: number | null;
-};
-
-export type GamingSuspectRow = {
-  run_id: string;
-  task: string | null;
-  test_verdict: string | null;
-  verifier_verdict: string | null;
-  verifier_confidence: string | null;
-  started_at: string | null;
-};
-
-export type CostTimelineRow = {
-  run_id: string;
-  started_at: string | null;
-  cost_usd: number | null;
-  turns: number | null;
-  verdict: string | null;
-  skill_sha: string | null;
-};
+export type SummaryRow = Schemas["SummaryRow"];
+export type PassRateRow = Schemas["PassRateRow"];
+export type VerdictSummaryRow = Schemas["VerdictSummaryRow"];
+export type GamingSuspectRow = Schemas["GamingSuspectRow"];
+export type CostTimelineRow = Schemas["CostTimelineRow"];

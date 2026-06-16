@@ -248,6 +248,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analytics/pass-rate-by-skill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pass Rate By Skill */
+        get: operations["pass_rate_by_skill_api_analytics_pass_rate_by_skill_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/verdict-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Verdict Summary */
+        get: operations["verdict_summary_api_analytics_verdict_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_analytics_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/gaming-suspects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Gaming Suspects */
+        get: operations["gaming_suspects_api_analytics_gaming_suspects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/cost-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cost Timeline */
+        get: operations["cost_timeline_api_analytics_cost_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -705,6 +790,35 @@ export interface components {
              */
             body: string;
         };
+        /** CostTimelineResponse */
+        CostTimelineResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Source */
+            source: string;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Rows */
+            rows: components["schemas"]["CostTimelineRow"][];
+        };
+        /** CostTimelineRow */
+        CostTimelineRow: {
+            /** Run Id */
+            run_id: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /** Turns */
+            turns?: number | null;
+            /** Verdict */
+            verdict?: string | null;
+            /** Skill Sha */
+            skill_sha?: string | null;
+        };
         /** EvidenceFileMeta */
         EvidenceFileMeta: {
             /** Name */
@@ -718,6 +832,35 @@ export interface components {
         EvidenceMeta: {
             /** Files */
             files: components["schemas"]["EvidenceFileMeta"][];
+        };
+        /** GamingSuspectRow */
+        GamingSuspectRow: {
+            /** Run Id */
+            run_id: string;
+            /** Task */
+            task?: string | null;
+            /** Test Verdict */
+            test_verdict?: string | null;
+            /** Verifier Verdict */
+            verifier_verdict?: string | null;
+            /** Verifier Confidence */
+            verifier_confidence?: string | null;
+            /** Started At */
+            started_at?: string | null;
+        };
+        /** GamingSuspectsResponse */
+        GamingSuspectsResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Source */
+            source: string;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Rows */
+            rows: components["schemas"]["GamingSuspectRow"][];
         };
         /** GenerateInput */
         GenerateInput: {
@@ -823,6 +966,31 @@ export interface components {
             /** Phases */
             phases: string[][];
         };
+        /** PassRateResponse */
+        PassRateResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Source */
+            source: string;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Rows */
+            rows: components["schemas"]["PassRateRow"][];
+        };
+        /** PassRateRow */
+        PassRateRow: {
+            /** Skill Sha */
+            skill_sha?: string | null;
+            /** Pass Rate */
+            pass_rate?: number | null;
+            /** Avg Cost */
+            avg_cost?: number | null;
+            /** N */
+            n?: number | null;
+        };
         /** ReposResponse */
         ReposResponse: {
             /** Repos */
@@ -886,6 +1054,35 @@ export interface components {
             accepted: boolean;
             /** Reason */
             reason?: string | null;
+        };
+        /** SummaryResponse */
+        SummaryResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Source */
+            source: string;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Rows */
+            rows: components["schemas"]["SummaryRow"][];
+        };
+        /** SummaryRow */
+        SummaryRow: {
+            /** Total Runs */
+            total_runs?: number | null;
+            /** Reviewed */
+            reviewed?: number | null;
+            /** Unreviewed */
+            unreviewed?: number | null;
+            /** Pass */
+            pass?: number | null;
+            /** Fail */
+            fail?: number | null;
+            /** Distinct Skills */
+            distinct_skills?: number | null;
         };
         /** TaskDetail */
         TaskDetail: {
@@ -1015,6 +1212,33 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VerdictSummaryResponse */
+        VerdictSummaryResponse: {
+            /** Generated At */
+            generated_at: string;
+            /** Source */
+            source: string;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Rows */
+            rows: components["schemas"]["VerdictSummaryRow"][];
+        };
+        /** VerdictSummaryRow */
+        VerdictSummaryRow: {
+            /** Verdict */
+            verdict?: string | null;
+            /** N */
+            n?: number | null;
+            /** Unreviewed */
+            unreviewed?: number | null;
+            /** Avg Cost */
+            avg_cost?: number | null;
+            /** Avg Turns */
+            avg_turns?: number | null;
         };
     };
     responses: never;
@@ -1410,6 +1634,134 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pass_rate_by_skill_api_analytics_pass_rate_by_skill_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassRateResponse"];
+                };
+            };
+        };
+    };
+    verdict_summary_api_analytics_verdict_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerdictSummaryResponse"];
+                };
+            };
+        };
+    };
+    summary_api_analytics_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryResponse"];
+                };
+            };
+        };
+    };
+    gaming_suspects_api_analytics_gaming_suspects_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                until?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GamingSuspectsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cost_timeline_api_analytics_cost_timeline_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                until?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CostTimelineResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

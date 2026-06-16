@@ -16,10 +16,16 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 
 from ._deps import err
 from ..util import ROOT, DB
+from ..schemas import (
+    CostTimelineResponse,
+    GamingSuspectsResponse,
+    PassRateResponse,
+    SummaryResponse,
+    VerdictSummaryResponse,
+)
 
 router = APIRouter(tags=["stats"])
 
@@ -43,15 +49,6 @@ _SUMMARY_SQL = (
     "COUNT(DISTINCT skill_sha) AS distinct_skills "
     "FROM runs"
 )
-
-
-class StatsEnvelope(BaseModel):
-    """集計レスポンスの封筒。loop.db が authoritative でないことを UI で明示するための注記付き。"""
-
-    generated_at: str
-    source: str
-    rows: list[dict[str, Any]]
-    has_more: bool = False
 
 
 def _connect_ro() -> sqlite3.Connection:
@@ -112,8 +109,9 @@ def _with_window(
     return sql, params
 
 
-def _envelope(rows: list[dict], *, limit: int | None = None) -> StatsEnvelope:
-    return StatsEnvelope(
+def _envelope(model_cls: type, rows: list[dict], *, limit: int | None = None):
+    """rows(SQL 由来 dict)を型付き応答モデルへ。Pydantic が行を各 Row 型へ検証する(§2.4)。"""
+    return model_cls(
         generated_at=datetime.now().isoformat(timespec="seconds"),
         source="loop.db (derived index; authoritative=runs/*.md)",
         rows=rows,
@@ -121,59 +119,59 @@ def _envelope(rows: list[dict], *, limit: int | None = None) -> StatsEnvelope:
     )
 
 
-def _query_simple(name: str) -> StatsEnvelope:
+def _query_simple(model_cls: type, name: str):
     """集計系 canned クエリ(期間フィルタなし=全期間固定。§5.4)。"""
     conn = _connect_ro()
     try:
-        return _envelope(_fetch(conn, _read_query(name)))
+        return _envelope(model_cls, _fetch(conn, _read_query(name)))
     finally:
         conn.close()
 
 
-@router.get("/analytics/pass-rate-by-skill", response_model=StatsEnvelope)
-def pass_rate_by_skill() -> StatsEnvelope:
-    return _query_simple("pass_rate_by_skill")
+@router.get("/analytics/pass-rate-by-skill", response_model=PassRateResponse)
+def pass_rate_by_skill() -> PassRateResponse:
+    return _query_simple(PassRateResponse, "pass_rate_by_skill")
 
 
-@router.get("/analytics/verdict-summary", response_model=StatsEnvelope)
-def verdict_summary() -> StatsEnvelope:
-    return _query_simple("verdict_summary")
+@router.get("/analytics/verdict-summary", response_model=VerdictSummaryResponse)
+def verdict_summary() -> VerdictSummaryResponse:
+    return _query_simple(VerdictSummaryResponse, "verdict_summary")
 
 
-@router.get("/analytics/summary", response_model=StatsEnvelope)
-def summary() -> StatsEnvelope:
+@router.get("/analytics/summary", response_model=SummaryResponse)
+def summary() -> SummaryResponse:
     conn = _connect_ro()
     try:
-        return _envelope(_fetch(conn, _SUMMARY_SQL))
+        return _envelope(SummaryResponse, _fetch(conn, _SUMMARY_SQL))
     finally:
         conn.close()
 
 
-@router.get("/analytics/gaming-suspects", response_model=StatsEnvelope)
+@router.get("/analytics/gaming-suspects", response_model=GamingSuspectsResponse)
 def gaming_suspects(
     since: str | None = None,
     until: str | None = None,
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
-) -> StatsEnvelope:
+) -> GamingSuspectsResponse:
     conn = _connect_ro()
     try:
         sql, params = _with_window(_read_query("gaming_suspects"), since, until, limit, offset)
-        return _envelope(_fetch(conn, sql, params), limit=limit)
+        return _envelope(GamingSuspectsResponse, _fetch(conn, sql, params), limit=limit)
     finally:
         conn.close()
 
 
-@router.get("/analytics/cost-timeline", response_model=StatsEnvelope)
+@router.get("/analytics/cost-timeline", response_model=CostTimelineResponse)
 def cost_timeline(
     since: str | None = None,
     until: str | None = None,
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
-) -> StatsEnvelope:
+) -> CostTimelineResponse:
     conn = _connect_ro()
     try:
         sql, params = _with_window(_COST_TIMELINE_SQL, since, until, limit, offset)
-        return _envelope(_fetch(conn, sql, params), limit=limit)
+        return _envelope(CostTimelineResponse, _fetch(conn, sql, params), limit=limit)
     finally:
         conn.close()
