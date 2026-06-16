@@ -121,6 +121,7 @@ def _fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
     return {
         "task_id": task_id,
         "goal": fm.get("goal", ""),
+        "repo": fm.get("repo", "") or "",
         "accept": fm.get("accept") or [],
         "verify": fm.get("verify", "") or "",
         "constraints": fm.get("constraints") or [],
@@ -131,10 +132,12 @@ def _fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
     }
 
 
-def _fm_from_form(task_id, goal, accept: list[str], verify, constraints: list[str],
+def _fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: list[str],
                   allowed_tools, max_attempts, status) -> dict:
     """フォーム入力 → front-matter dict(順序を固定。空フィールドは省く)。"""
     fm: dict = {"id": task_id, "goal": goal.strip("\n")}
+    if (repo or "").strip():
+        fm["repo"] = repo.strip()
     acc = [x.strip() for x in accept if x.strip()]
     if acc:
         fm["accept"] = acc
@@ -181,13 +184,19 @@ def todo_new(request: Request, prompt: str = "", error: str = ""):
     return templates.TemplateResponse(request, "todo_new.html", {"prompt": prompt, "error": error})
 
 
+def _known_repos() -> list[str]:
+    cfg = runner.load_config()
+    names = list((cfg.get("repos") or {}).keys())
+    return names + ["none"]
+
+
 @app.get("/todo/new/manual", response_class=HTMLResponse)
 def todo_new_manual(request: Request):
-    fields = {"task_id": "", "goal": "", "accept": [], "verify": "", "constraints": [],
+    fields = {"task_id": "", "goal": "", "repo": "", "accept": [], "verify": "", "constraints": [],
               "allowed_tools": "Read, Edit, Write, Grep, Glob, Bash", "max_attempts": "",
               "status": "todo", "body": ""}
     return templates.TemplateResponse(request, "todo_edit.html", {
-        "f": fields, "is_new": True, "saved": False, "statuses": _STATUSES})
+        "f": fields, "is_new": True, "saved": False, "statuses": _STATUSES, "repos": _known_repos()})
 
 
 @app.post("/todo/generate")
@@ -211,32 +220,33 @@ def todo_edit(request: Request, task_id: str, saved: int = 0, generated: int = 0
     fm, body = res
     return templates.TemplateResponse(request, "todo_edit.html", {
         "f": _fields_from_fm(tid, fm, body), "is_new": False, "saved": bool(saved),
-        "generated": bool(generated), "statuses": _STATUSES})
+        "generated": bool(generated), "statuses": _STATUSES, "repos": _known_repos()})
 
 
 @app.post("/todo/new")
-def todo_create(task_id: str = Form(""), goal: str = Form(""), accept: list[str] = Form([]),
-                verify: str = Form(""), constraints: list[str] = Form([]), allowed_tools: str = Form(""),
-                max_attempts: str = Form(""), status: str = Form("todo"), body: str = Form("")):
+def todo_create(task_id: str = Form(""), goal: str = Form(""), repo: str = Form(""),
+                accept: list[str] = Form([]), verify: str = Form(""), constraints: list[str] = Form([]),
+                allowed_tools: str = Form(""), max_attempts: str = Form(""), status: str = Form("todo"),
+                body: str = Form("")):
     tid = _safe_id(task_id)
     if not tid:
         return HTMLResponse("不正な id です(英数字と . _ - のみ、先頭は英数字)。", status_code=400)
     if (runner.TASKS_DIR / f"{tid}.md").exists():
         return HTMLResponse(f"既に存在します: {tid}", status_code=409)
-    fm = _fm_from_form(tid, goal, accept, verify, constraints, allowed_tools, max_attempts, status)
+    fm = _fm_from_form(tid, goal, repo, accept, verify, constraints, allowed_tools, max_attempts, status)
     p = runner.write_task(tid, fm, body)
     runner.auto_commit(runner.DATA, [p], f"todo: {tid} を新規作成")
     return RedirectResponse(f"/todo/{tid}?saved=1", status_code=303)
 
 
 @app.post("/todo/{task_id}")
-def todo_save(task_id: str, goal: str = Form(""), accept: list[str] = Form([]), verify: str = Form(""),
-              constraints: list[str] = Form([]), allowed_tools: str = Form(""), max_attempts: str = Form(""),
-              status: str = Form("todo"), body: str = Form("")):
+def todo_save(task_id: str, goal: str = Form(""), repo: str = Form(""), accept: list[str] = Form([]),
+              verify: str = Form(""), constraints: list[str] = Form([]), allowed_tools: str = Form(""),
+              max_attempts: str = Form(""), status: str = Form("todo"), body: str = Form("")):
     tid = _safe_id(task_id)
     if not tid:
         return HTMLResponse("invalid id", status_code=400)
-    fm = _fm_from_form(tid, goal, accept, verify, constraints, allowed_tools, max_attempts, status)
+    fm = _fm_from_form(tid, goal, repo, accept, verify, constraints, allowed_tools, max_attempts, status)
     p = runner.write_task(tid, fm, body)
     runner.auto_commit(runner.DATA, [p], f"todo: {tid} を編集")
     return RedirectResponse(f"/todo/{tid}?saved=1", status_code=303)

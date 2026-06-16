@@ -1,7 +1,7 @@
 .DS_Store
 __pycache__/
 *.pyc
-# worktree はリポジトリ外(../.loop-worktrees)に切るが念のため
+# worktree は対象 repo に依らずこの loop repo 内に固定配置し ignore(data/ と同じ方針)
 .loop-worktrees/
 # 契約データは別の private git repo(エンジン=公開 repo には含めない)
 data/

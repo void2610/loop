@@ -9,12 +9,13 @@
 {% if started == 'busy' %}<p class="timeout">他の run が進行中のため実行できませんでした。</p>{% endif %}
 
 <table>
-  <thead><tr><th>id</th><th>status</th><th>goal</th><th>最新 run</th><th></th></tr></thead>
+  <thead><tr><th>id</th><th>status</th><th>repo</th><th>goal</th><th>最新 run</th><th></th></tr></thead>
   <tbody>
   {% for t in tasks %}
     <tr>
       <td><a href="/todo/{{ t.id }}">{{ t.id }}</a></td>
       <td class="{{ t.status or 'todo' }}">{{ t.status or 'todo' }}</td>
+      <td class="muted">{{ t.repo or '(default)' }}</td>
       <td class="muted">{{ (t.goal or '').split('\n')[0] }}</td>
       <td>
         {% set lr = last.get(t.id) %}
@@ -31,7 +32,7 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="5" class="muted">タスクがありません。「＋ 新規」で追加してください。</td></tr>
+    <tr><td colspan="6" class="muted">タスクがありません。「＋ 新規」で追加してください。</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -58,7 +58,9 @@ clone 後に1回:
 
 ## 1 run の流れ(runner.py / 種類A)
 
-`data/tasks/*.md`(1 タスク=1 ファイル)から次の `todo` を選択 → `git worktree` 隔離 → **3役 Sub-agents** → 自動チェックポイントコミット(成果を `loop/<id>` ブランチへ)→ `runs/<id>.md` 生成(front-matter・証拠・判断は空 / `reviewed:false`)→ SQLite upsert → worktree 後始末。
+`data/tasks/*.md`(1 タスク=1 ファイル)から次の `todo` を選択 → **対象 repo を解決**(タスクの `repo`)→ `git worktree` 隔離 → **3役 Sub-agents** → 自動チェックポイントコミット(成果を `loop/<id>` ブランチへ)→ `runs/<id>.md` 生成(front-matter・証拠・判断は空 / `reviewed:false`)→ SQLite upsert → worktree 後始末。
+
+**複数リポジトリ**: タスクの `repo` で対象を指定(`loop.toml [repos]` の登録名 / 絶対パス / 未指定=デフォルト / `none`=外部FS作業で git worktree なしの一時ディレクトリ実行)。worktree は対象 repo に依らず **loop repo 内 `.loop-worktrees/`(gitignore)に固定配置**。`repo`/`repo_sha`/`skill_sha` を front-matter に記録。
 
 3役(記事の Sub-agents モジュール。`[agents]` でモデル/ツールを指定):
 

@@ -13,7 +13,7 @@ COLUMNS = [
     "run_id", "task", "verdict", "reviewed", "model", "cost_usd", "turns",
     "duration_ms", "session_id", "repo_sha", "skill_sha", "goal_contract_sha",
     "started_at", "md_path",
-    "test_verdict", "verifier_verdict", "verifier_confidence",
+    "test_verdict", "verifier_verdict", "verifier_confidence", "repo",
 ]
 
 SCHEMA = """
@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS runs (
   md_path           TEXT,
   test_verdict        TEXT,
   verifier_verdict    TEXT,
-  verifier_confidence TEXT
+  verifier_confidence TEXT,
+  repo                TEXT
 );
 """
 
@@ -87,6 +88,7 @@ def _coerce(fm: dict, run_id: str, md_path: str) -> dict:
         "test_verdict": fm.get("test_verdict"),
         "verifier_verdict": fm.get("verifier_verdict"),
         "verifier_confidence": fm.get("verifier_confidence"),
+        "repo": fm.get("repo"),
     }
 
 
