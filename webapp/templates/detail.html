@@ -26,17 +26,19 @@
     {% if evidence.transcript %}<p><a href="/run/{{run_id}}/transcript">transcript を読む</a> <a href="/run/{{run_id}}/file/transcript.jsonl" target="_blank" class="muted">(生 JSONL)</a></p>{% endif %}
   </div>
 
-  <div>
+  <div class="review-pane">
     <h3>判断 <span class="muted">(種類B / あなたが書く。GUI は生成・提案しない)</span></h3>
-    <form method="post" action="/run/{{run_id}}/judge">
+    <form class="judgment-form" method="post" action="/run/{{run_id}}/judge">
       <fieldset>
       {% for key,label in fields %}
         <label for="{{key}}">{{label}}</label>
-        <textarea id="{{key}}" name="{{key}}">{{ judgment[key] }}</textarea>
+        <textarea id="{{key}}" name="{{key}}" class="{{ 'grow2' if key == 'learning' else '' }}">{{ judgment[key] }}</textarea>
       {% endfor %}
       </fieldset>
-      <p class="muted">submit すると runs/{{run_id}}.md に書き戻し、「自動検証に入れるべきチェック」は review-notes.md に追記、reviewed 化・コミット・再インデックスを自動実行します。</p>
-      <button type="submit">判断を保存(契約ファイルへ書き込み)</button>
+      <div class="actions">
+        <p class="muted">submit すると runs/{{run_id}}.md に書き戻し、「自動検証に入れるべきチェック」は review-notes.md に追記、reviewed 化・コミット・再インデックスを自動実行します。</p>
+        <button type="submit">判断を保存(契約ファイルへ書き込み)</button>
+      </div>
     </form>
   </div>
 </div>
