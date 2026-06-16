@@ -160,6 +160,15 @@ def remove_worktree(repo: Path, wt: Path) -> None:
     git(repo, "worktree", "remove", "--force", str(wt))
 
 
+def commit_worktree(wt: Path, message: str) -> bool:
+    """worktree のステージ済み変更を loop/<id> ブランチにコミットする。
+    remove --force は作業ツリーを破棄するため、ここで commit しないと成果がブランチに残らない。"""
+    if git(wt, "diff", "--cached", "--quiet").returncode == 0:
+        return False  # 変更なし
+    git(wt, "commit", "-q", "-m", message)
+    return True
+
+
 def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
     """種類A: チェックポイントコミット。loop.db(ビュー)は .gitignore 済みなので入らない。"""
     rels = [str(p.relative_to(repo)) for p in paths if p.exists()]
@@ -186,6 +195,7 @@ def run_claude(prompt: str, wt: Path, cfg: dict, task: dict, run_dir: Path) -> t
         "claude", "-p", prompt,
         "--output-format", "json",
         "--model", model,
+        "--max-turns", str(loop["max_turns"]),
         "--max-budget-usd", str(loop["max_budget_usd"]),
         "--permission-mode", loop.get("permission_mode", "default"),
         "--allowedTools", *tools,
@@ -295,10 +305,14 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
 {chr(10).join(evidence)}
 
 {JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない）
-- 信用できるか:
-- 失敗/リスク:
-- 自動検証に入れるべきチェック:   （→ review-notes.md にも転記）
-- 学び:
+
+### 信用できるか
+
+### 失敗/リスク
+
+### 自動検証に入れるべきチェック
+
+### 学び
 """
     out = RUNS / f"{run_id}.md"
     out.write_text(body, encoding="utf-8")
@@ -357,45 +371,52 @@ JUDGMENT_FIELDS = [
 
 
 def parse_judgment(md: Path) -> dict:
-    """MD の判断セクションから 4 フィールドの現在値を読む(フォームの prefill 用)。"""
+    """MD の判断セクション(### サブ見出し)から各フィールドの現在値を読む(prefill 用)。
+    複数行・複数段落をそのまま保持する。"""
     label_to_key = {label: key for key, label in JUDGMENT_FIELDS}
     values = {key: "" for key, _ in JUDGMENT_FIELDS}
-    in_section = False
-    for line in md.read_text(encoding="utf-8").splitlines():
-        if line.startswith(JUDGMENT_HEADING):
-            in_section = True
-            continue
-        if in_section and line.startswith("- ") and ":" in line:
-            label, _, rest = line[2:].partition(":")
-            label = label.strip()
-            if label in label_to_key:
-                v = rest.strip()
-                if v.startswith("（→"):  # 未記入のプレースホルダ
-                    v = ""
-                values[label_to_key[label]] = v
+    text = md.read_text(encoding="utf-8")
+    if JUDGMENT_HEADING not in text:
+        return values
+    section = text.split(JUDGMENT_HEADING, 1)[1]
+    cur, buf = None, []
+    for line in section.splitlines():
+        if line.startswith("### "):
+            if cur is not None:
+                values[cur] = "\n".join(buf).strip()
+            cur, buf = label_to_key.get(line[4:].strip()), []
+        elif cur is not None:
+            buf.append(line)
+    if cur is not None:
+        values[cur] = "\n".join(buf).strip()
     return values
 
 
 def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
     """種類A: GUI から来た判断を契約ファイルへ書き戻す。中身(fields)は人間が書いたもの。
-    判断セクション置換 → review-notes.md 追記 → reviewed 化 → SQLite 再導出 → コミット。"""
+    判断セクション置換 → review-notes.md 追記 → reviewed 化 → SQLite 再導出 → コミット。
+    複数行の散文(学び・判断)を圧縮せずそのまま保持する。"""
     md = RUNS / f"{run_id}.md"
     lines = md.read_text(encoding="utf-8").splitlines()
     head = next((i for i, l in enumerate(lines) if l.startswith(JUDGMENT_HEADING)), len(lines))
 
-    def one_line(s: str) -> str:
-        return " / ".join(p.strip() for p in (s or "").splitlines() if p.strip())
-
-    section = [f"{JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない）"]
+    section = [f"{JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない）", ""]
     for key, label in JUDGMENT_FIELDS:
-        section.append(f"- {label}: {one_line(fields.get(key, ''))}")
-    md.write_text("\n".join(lines[:head] + section) + "\n", encoding="utf-8")
+        section.append(f"### {label}")
+        section.append("")
+        val = (fields.get(key) or "").strip()
+        if val:
+            section.append(val)
+            section.append("")
+    md.write_text("\n".join(lines[:head] + section).rstrip() + "\n", encoding="utf-8")
 
-    checks = one_line(fields.get("checks", ""))
+    checks = (fields.get("checks") or "").strip()
     if checks:
         day = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+        cl = checks.splitlines()
+        entry = f"- {day} {run_id}: {cl[0]}\n" + "".join(f"  {x}\n" for x in cl[1:])
         with REVIEW_NOTES.open("a", encoding="utf-8") as f:
-            f.write(f"- {day} {run_id}: {checks}\n")
+            f.write(entry)
 
     set_md_reviewed(md)
     conn = loopdb.connect(DB)
@@ -407,50 +428,69 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
 # --- コマンド ---
 
 def cmd_run() -> int:
+    import os
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
     REVIEW_NOTES.touch(exist_ok=True)
-    task = next_todo(parse_tasks())
-    if not task:
-        print("実行可能な todo タスクがありません(TODO.md)。")
-        return 0
 
-    now = datetime.now(timezone.utc).astimezone()
-    run_id = f"{now:%Y-%m-%d}-{task['id']}"
-    run_dir = RUNS / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    started_at = now.isoformat(timespec="seconds")
-
-    print(f"▶ run: {run_id}")
-    repo = repo_root(cfg)
-    wt, branch = add_worktree(repo, run_id)
+    # 単一オペレータ前提の atomic claim。/dispatch 連打などの同時実行で
+    # 同一タスクを2プロセスが拾い branch 衝突するのを防ぐ。
+    lock = DATA / ".run.lock"
     try:
-        print("  · claude -p 実行中 …")
-        result, hint = run_claude(render_prompt(task), wt, cfg, task, run_dir)
-        copy_transcript(result, run_dir)
-        capture_diff(wt, run_dir)
+        os.close(os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        print("別の run が進行中です(data/.run.lock)。完了を待つか、残留なら削除してください。")
+        return 1
 
-        if hint == "timeout":
-            verdict, vcode = "timeout", None
-        elif hint == "error":
-            verdict, vcode = "fail", None
-        else:
-            verdict, vcode = run_verify(task, wt, run_dir)
+    try:
+        task = next_todo(parse_tasks())
+        if not task:
+            print("実行可能な todo タスクがありません(TODO.md)。")
+            return 0
 
-        md = write_run_md(task, run_id, verdict, result, cfg, started_at, vcode)
-        update_status(task["id"], verdict)
+        now = datetime.now(timezone.utc).astimezone()
+        # 同日リトライでの run_id 衝突(過去 run の上書き)を避けるため時刻まで含める。
+        run_id = f"{now:%Y-%m-%d-%H%M%S}-{task['id']}"
+        run_dir = RUNS / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        started_at = now.isoformat(timespec="seconds")
 
-        conn = loopdb.connect(DB)
-        loopdb.upsert_md(conn, md)
-        conn.close()
+        print(f"▶ run: {run_id}")
+        repo = repo_root(cfg)
+        wt, branch = add_worktree(repo, run_id)
+        try:
+            print("  · claude -p 実行中 …")
+            result, hint = run_claude(render_prompt(task), wt, cfg, task, run_dir)
+            copy_transcript(result, run_dir)
+            capture_diff(wt, run_dir)
 
-        auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {verdict}")
+            if hint == "timeout":
+                verdict, vcode = "timeout", None
+            elif hint == "error":
+                verdict, vcode = "fail", None
+            else:
+                verdict, vcode = run_verify(task, wt, run_dir)
 
-        print(f"  · verdict: {verdict}")
-        print(f"  · run MD: {md.relative_to(DATA)}（判断は未記入 / reviewed:false）")
-        print(f"  · SQLite upsert 済 / 自動コミット済 / branch 保持: {branch}")
+            # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
+            committed = commit_worktree(wt, f"loop run {run_id} → {verdict}")
+
+            md = write_run_md(task, run_id, verdict, result, cfg, started_at, vcode)
+            update_status(task["id"], verdict)
+
+            conn = loopdb.connect(DB)
+            loopdb.upsert_md(conn, md)
+            conn.close()
+
+            auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {verdict}")
+
+            print(f"  · verdict: {verdict}")
+            print(f"  · run MD: {md.relative_to(DATA)}（判断は未記入 / reviewed:false）")
+            branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
+            print(f"  · SQLite upsert 済 / data へ自動コミット済 / {branch_note}")
+        finally:
+            remove_worktree(repo, wt)
     finally:
-        remove_worktree(repo, wt)
+        lock.unlink(missing_ok=True)
     return 0
 
 

@@ -5,12 +5,16 @@
 # headless 実行に使うモデル(エイリアス可)。タスク側で上書きできる。
 model = "claude-sonnet-4-6"
 
-# 停止条件。--max-turns は現行 CLI に無いため、予算上限と wall-clock タイムアウトで止める。
+# 停止条件は3段で持つ。turn 上限が暴走ループの一次ガード。
+# --max-budget-usd の支出は 2026/6/15 以降 Agent SDK クレジットから引かれるため、
+# サブスク型ランナーのセッション枯渇は budget では守れない。turn + wall-clock の併用に意味がある。
+max_turns = 40
 max_budget_usd = 2.0
 timeout_seconds = 1800
 
-# タスクが allowed_tools を指定しなかった場合のフォールバック。スコープは狭く保つ。
-default_allowed_tools = ["Read", "Edit", "Write", "Bash"]
+# タスクが allowed_tools を指定しなかった場合のフォールバック。
+# -p モードでは未許可ツールは(尋ねられず)拒否されるため、コード探索の Grep/Glob も入れておく。
+default_allowed_tools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
 
 # permission-mode。default だと未認可ツールはブロックされる(承認する人間がいないため)。
 permission_mode = "default"
