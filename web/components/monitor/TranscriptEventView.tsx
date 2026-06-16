@@ -5,6 +5,11 @@ import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { RunStreamEventData } from "@/lib/sse";
+import { Markdown } from "@/components/markdown";
+
+// 散文系(プロンプト/アシスタント/思考)は Markdown 装飾。構造系(ツール入力 JSON / 実行結果ログ)は
+// 改行・記号を壊さないよう monospace の <pre> のまま表示する。
+const MARKDOWN_CLS = new Set(["user", "assistant", "think"]);
 
 // cls ごとの色分け(現行 monitor_live.html の表示分岐を移植)。事実の整形のみ。
 const CLS_STYLE: Record<string, string> = {
@@ -58,9 +63,13 @@ export function TranscriptEventView({ ev }: { ev: RunStreamEventData }) {
         header
       )}
       {open && body ? (
-        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs text-foreground/90">
-          {body}
-        </pre>
+        MARKDOWN_CLS.has(cls) ? (
+          <Markdown className="mt-1">{body}</Markdown>
+        ) : (
+          <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-xs text-foreground/90">
+            {body}
+          </pre>
+        )
       ) : null}
     </div>
   );
