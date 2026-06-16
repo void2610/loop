@@ -441,8 +441,9 @@ def _safe_task_id(raw: str) -> str:
     return s or "task"
 
 
-def cmd_gen(prompt: str, auto_run: bool = False) -> int:
-    """自然言語の依頼からタスクを生成して data/tasks/ に書き、必要なら実行(background 想定)。"""
+def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int:
+    """自然言語の依頼からタスクを生成して data/tasks/ に書き、必要なら実行(background 想定)。
+    repo を明示指定したら(空/None 以外)モデル推定を上書きする('default' は repo 省略=デフォルト)。"""
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
     print("▶ タスク生成中 …")
@@ -474,6 +475,11 @@ def cmd_gen(prompt: str, auto_run: bool = False) -> int:
     if isinstance(ma, int) and ma > 0:
         fm["max_attempts"] = ma
     fm["status"] = "todo"
+    if repo:  # 明示選択を優先(モデル推定を上書き)
+        if repo == "default":
+            fm.pop("repo", None)
+        else:
+            fm["repo"] = repo
     p = write_task(tid, fm, str(obj.get("notes", "") or ""))
     auto_commit(DATA, [p], f"todo: {tid} をプロンプトから生成")
     print(f"  · 生成: {tid}")
@@ -939,7 +945,9 @@ def main() -> int:
     if cmd == "run":
         return cmd_run(sys.argv[2] if len(sys.argv) > 2 else None)
     if cmd == "gen":
-        return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in sys.argv[3:])
+        rest = sys.argv[3:]
+        repo = rest[rest.index("--repo") + 1] if "--repo" in rest and rest.index("--repo") + 1 < len(rest) else None
+        return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest, repo)
     table = {"reindex": cmd_reindex, "review": cmd_review, "status": cmd_status}
     if cmd in table:
         return table[cmd]()

@@ -194,7 +194,8 @@ def todo_list(request: Request, started: str = "", generating: int = 0):
 @app.get("/todo/new", response_class=HTMLResponse)
 def todo_new(request: Request, prompt: str = "", error: str = ""):
     # 既定はプロンプト入力(Claude Code にタスクを考えさせる)
-    return templates.TemplateResponse(request, "todo_new.html", {"prompt": prompt, "error": error})
+    return templates.TemplateResponse(request, "todo_new.html", {
+        "prompt": prompt, "error": error, "repos": _known_repos()})
 
 
 def _known_repos() -> list[str]:
@@ -213,11 +214,13 @@ def todo_new_manual(request: Request):
 
 
 @app.post("/todo/generate")
-def todo_generate(prompt: str = Form(""), auto_run: str = Form("")):
+def todo_generate(prompt: str = Form(""), auto_run: str = Form(""), repo: str = Form("")):
     # 生成(claude -p, 数十秒)は background に投げて即リダイレクト。完了後リロードで一覧に現れる。
     if not prompt.strip():
         return RedirectResponse("/todo/new", status_code=303)
     args = ["uv", "run", "runner.py", "gen", prompt.strip()]
+    if repo.strip():  # 明示選択(空=モデルに推定させる)
+        args += ["--repo", repo.strip()]
     if auto_run:
         args.append("--run")
     subprocess.Popen(args, cwd=str(ROOT))

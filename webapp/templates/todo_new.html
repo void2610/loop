@@ -11,6 +11,14 @@
      生成後に内容を確認・修正できます。</p>
 
   <form id="genform" method="post" action="/todo/generate" class="task-form">
+    <label for="repo">対象リポジトリ</label>
+    <select id="repo" name="repo">
+      <option value="">(自動: 依頼から推定)</option>
+      <option value="default">デフォルト</option>
+      {% for r in repos if r != 'none' %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      <option value="none">none(外部FS・git なし)</option>
+    </select>
+
     <label for="prompt">依頼内容</label>
     <textarea id="prompt" name="prompt" rows="6" required autofocus
       placeholder="例: package.json のテストが CI で間欠失敗する。原因を直して 10 回連続で通るようにして。&#10;例: docs/ の壊れた相対リンクを全部見つけて修正して。">{{ prompt }}</textarea>
