@@ -11,9 +11,9 @@
      生成後に内容を確認・修正できます。</p>
 
   <form id="genform" method="post" action="/todo/generate" class="task-form">
-    <label for="repo">対象リポジトリ</label>
-    <select id="repo" name="repo">
-      <option value="">(自動: 依頼から推定)</option>
+    <label for="repo">対象リポジトリ <span class="muted">(必須。推定はしません)</span></label>
+    <select id="repo" name="repo" required>
+      <option value="" disabled selected>— リポジトリを選択 —</option>
       <option value="default">デフォルト</option>
       {% for r in repos if r != 'none' %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
       <option value="none">none(外部FS・git なし)</option>

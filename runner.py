@@ -385,7 +385,6 @@ TASK_GEN_SCHEMA = {
     "properties": {
         "id": {"type": "string"},
         "goal": {"type": "string"},
-        "repo": {"type": "string"},
         "accept": {"type": "array", "items": {"type": "string"}},
         "verify": {"type": "string"},
         "constraints": {"type": "array", "items": {"type": "string"}},
@@ -404,15 +403,9 @@ def generate_task(prompt: str, cfg: dict) -> dict | None:
     model = agents.get("author_model") or agents["implementer_model"]
     # 「実行せず変換せよ」を明示。これが無いと依頼内容(例: ファイル作成)を実際にやろうとして
     # read-only 拒否 → リトライで turn を空回りし遅くなる。
-    repos = cfg.get("repos", {})
-    default_repo = cfg.get("repo", {}).get("path", ".")
-    repo_hint = (f"\n\n# 対象リポジトリ(repo フィールド)\n"
-                 f"登録済み: {', '.join(repos) if repos else '(なし)'} / デフォルト: {default_repo}\n"
-                 f"依頼に合うリポジトリ名(または絶対パス)を repo に指定。リポジトリに属さない作業"
-                 f"(~/ などリポジトリ外の FS 操作)は repo: none。不明ならデフォルトでよい(省略可)。")
+    # 対象リポジトリは UI で明示選択する(モデルには推定させない)。
     wrapped = ("次の依頼を loop の『目標契約(タスク定義)』に変換し、構造化出力で返してください。"
-               "**ファイルの作成・編集・コマンド実行は一切しないでください。設計だけ**です。"
-               + repo_hint + "\n\n# 依頼\n" + prompt)
+               "**ファイルの作成・編集・コマンド実行は一切しないでください。設計だけ**です。\n\n# 依頼\n" + prompt)
     cmd = [
         "claude", "-p", wrapped,
         "--output-format", "json",
@@ -456,9 +449,6 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int
     while (TASKS_DIR / f"{tid}.md").exists():
         tid, n = f"{base}-{n}", n + 1
     fm: dict = {"id": tid, "goal": str(obj.get("goal", "")).strip("\n")}
-    rp = str(obj.get("repo", "") or "").strip()
-    if rp:
-        fm["repo"] = rp
     acc = [str(x).strip() for x in (obj.get("accept") or []) if str(x).strip()]
     if acc:
         fm["accept"] = acc
