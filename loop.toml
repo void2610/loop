@@ -32,6 +32,7 @@ permission_mode = "default"
 explorer_model    = "claude-haiku-4-5-20251001"   # 高速・調査(read-only)
 implementer_model = "claude-sonnet-4-6"           # 主力(従来の maker)
 verifier_model    = "claude-opus-4-8"             # 別モデル必須(implementer と異なること)
+author_model      = "claude-sonnet-4-6"           # 自然言語→目標契約の生成(Web の「新規作成」)
 
 # 役割ごとの allowed_tools。Explorer/Verifier は read-only を厳守(判定者は直さない)。
 explorer_tools    = ["Read", "Grep", "Glob"]

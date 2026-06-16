@@ -347,6 +347,53 @@ def combine_verdict(test_verdict: str, verifier_verdict: str) -> str:
     return "pass"
 
 
+# --- タスク生成(自然言語 → 目標契約。専用 skill + 構造化出力) ---
+
+TASK_AUTHOR_SKILL = ROOT / ".claude" / "skills" / "task-author" / "SKILL.md"
+
+TASK_GEN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "goal": {"type": "string"},
+        "accept": {"type": "array", "items": {"type": "string"}},
+        "verify": {"type": "string"},
+        "constraints": {"type": "array", "items": {"type": "string"}},
+        "allowed_tools": {"type": "string"},
+        "max_attempts": {"type": "integer"},
+        "notes": {"type": "string"},
+    },
+    "required": ["id", "goal", "accept"],
+}
+
+
+def generate_task(prompt: str, cfg: dict) -> dict | None:
+    """自然言語の依頼を専用 skill 付きで claude -p に渡し、目標契約を構造化出力で得る。
+    ファイルへの書き込みは行わない(backend が write_task で決定論的に書く)。"""
+    agents, loop = cfg["agents"], cfg["loop"]
+    model = agents.get("author_model") or agents["implementer_model"]
+    cmd = [
+        "claude", "-p", prompt,
+        "--output-format", "json",
+        "--model", model,
+        "--max-turns", str(loop.get("max_turns", 40)),
+        "--max-budget-usd", str(loop["max_budget_usd"]),
+        "--permission-mode", loop.get("permission_mode", "default"),
+        "--allowedTools", "Read", "Grep", "Glob",
+        "--json-schema", json.dumps(TASK_GEN_SCHEMA, ensure_ascii=False),
+    ]
+    if TASK_AUTHOR_SKILL.exists():
+        cmd += ["--append-system-prompt", TASK_AUTHOR_SKILL.read_text(encoding="utf-8")]
+    try:
+        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
+                              timeout=loop["timeout_seconds"])
+        result = json.loads(proc.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+    obj = result.get("structured_output")
+    return obj if isinstance(obj, dict) else None
+
+
 # --- 証拠収集 ---
 
 def capture_diff(wt: Path, run_dir: Path) -> None:

@@ -175,7 +175,13 @@ def todo_list(request: Request, started: str = ""):
 
 
 @app.get("/todo/new", response_class=HTMLResponse)
-def todo_new(request: Request):
+def todo_new(request: Request, prompt: str = "", error: str = ""):
+    # 既定はプロンプト入力(Claude Code にタスクを考えさせる)
+    return templates.TemplateResponse(request, "todo_new.html", {"prompt": prompt, "error": error})
+
+
+@app.get("/todo/new/manual", response_class=HTMLResponse)
+def todo_new_manual(request: Request):
     fields = {"task_id": "", "goal": "", "accept": [], "verify": "", "constraints": [],
               "allowed_tools": "Read, Edit, Write, Grep, Glob, Bash", "max_attempts": "",
               "status": "todo", "body": ""}
@@ -183,15 +189,41 @@ def todo_new(request: Request):
         "f": fields, "is_new": True, "saved": False, "statuses": _STATUSES})
 
 
+@app.post("/todo/generate")
+def todo_generate(request: Request, prompt: str = Form(""), auto_run: str = Form("")):
+    prompt = prompt.strip()
+    if not prompt:
+        return RedirectResponse("/todo/new", status_code=303)
+    obj = runner.generate_task(prompt, runner.load_config())
+    if not obj or not obj.get("id") or not obj.get("goal"):
+        return templates.TemplateResponse(request, "todo_new.html", {
+            "prompt": prompt, "error": "生成に失敗しました(モデル出力が不正)。文言を変えて再試行するか、手動作成へ。"})
+    # id を安全化 + 一意化
+    base = _safe_id(re.sub(r"[^A-Za-z0-9._-]+", "-", obj["id"]).strip("-.")) or "task"
+    tid, n = base, 2
+    while (runner.TASKS_DIR / f"{tid}.md").exists():
+        tid, n = f"{base}-{n}", n + 1
+    fm = _fm_from_form(tid, obj.get("goal", ""), obj.get("accept") or [], obj.get("verify", "") or "",
+                       obj.get("constraints") or [], obj.get("allowed_tools", "") or "",
+                       obj.get("max_attempts", ""), "todo")
+    p = runner.write_task(tid, fm, obj.get("notes", "") or "")
+    runner.auto_commit(runner.DATA, [p], f"todo: {tid} をプロンプトから生成")
+    if auto_run and not (runner.DATA / ".run.lock").exists():
+        subprocess.Popen(["uv", "run", "runner.py", "run", tid], cwd=str(ROOT))
+        return RedirectResponse(f"/todo?started={tid}", status_code=303)
+    return RedirectResponse(f"/todo/{tid}?generated=1", status_code=303)
+
+
 @app.get("/todo/{task_id}", response_class=HTMLResponse)
-def todo_edit(request: Request, task_id: str, saved: int = 0):
+def todo_edit(request: Request, task_id: str, saved: int = 0, generated: int = 0):
     tid = _safe_id(task_id)
     res = runner.read_task(tid) if tid else None
     if res is None:
         return HTMLResponse(f"task not found: {task_id}", status_code=404)
     fm, body = res
     return templates.TemplateResponse(request, "todo_edit.html", {
-        "f": _fields_from_fm(tid, fm, body), "is_new": False, "saved": bool(saved), "statuses": _STATUSES})
+        "f": _fields_from_fm(tid, fm, body), "is_new": False, "saved": bool(saved),
+        "generated": bool(generated), "statuses": _STATUSES})
 
 
 @app.post("/todo/new")

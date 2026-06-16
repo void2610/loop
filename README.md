@@ -41,7 +41,8 @@ clone 後に1回:
 | SQLite を MD から完全再生成 | `just reindex` | A |
 | DuckDB 分析(canned / ad-hoc) | `just stats` / `just stats-sql "SELECT …"` | A |
 | verdict・reviewed 一覧 | `just status` | A |
-| タスク(目標契約)の確認・編集・新規作成 | Web GUI `/todo`(`data/tasks/*.md` を編集) | A/契約 |
+| タスクをプロンプトから生成(Claude Code が目標契約に変換) | Web GUI `/todo/new`(専用 skill + 構造化出力)。作成後トグルで自動実行 | A/生成 |
+| タスクの確認・編集(行 UI フォーム)・実行 | Web GUI `/todo`・`/todo/<id>`(`data/tasks/*.md`) | A/契約 |
 | tasks 変更で自動起動(opt-in) | `just watch-install` / `just watch-uninstall` | A |
 
 ### レビュー(種類B)の流れ — Web GUI(v4 既定)

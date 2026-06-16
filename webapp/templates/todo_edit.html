@@ -2,6 +2,7 @@
 {% block title %}{{ "新規タスク" if is_new else f.task_id }} — TODO — loop{% endblock %}
 {% block body %}
 <p><a href="/todo">← タスク一覧</a></p>
+{% if generated %}<p class="pass">プロンプトから生成しました。内容を確認・修正して保存、または「実行」してください。</p>{% endif %}
 {% if saved %}<p class="pass">保存しました(data repo へコミット済み)。</p>{% endif %}
 
 <h2 style="max-width:60rem">{% if is_new %}新規タスク{% else %}{{ f.task_id }} を編集{% endif %}
