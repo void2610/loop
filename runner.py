@@ -1031,13 +1031,24 @@ def _run_parallel(task_id: str | None, cfg: dict, max_concurrency: int) -> int:
     """max_concurrency>1 の並列実行。in-process claim + ThreadPool で N 本同時に回す。
     claude -p は subprocess 委譲なので GIL を待たず並行する(§4.6)。"""
     _warn_same_verifier(cfg)
-    if task_id:  # 単一タスク指定はそのまま 1 本実行(claim 競合の対象がない)
-        task = next((t for t in parse_tasks() if t.get("id") == task_id), None)
-        if not task:
-            print(f"タスクが見つかりません: {task_id}")
+    if task_id:  # 単一タスク指定。別タスクとは並行可だが、同一タスクの二重起動だけは防ぐ。
+        # max_concurrency>1 では全体 .run.lock を持たないため、ここは task 単位の atomic claim
+        # (.run-<id>.lock の O_EXCL)で「同じタスクを2プロセスが同時実行」だけを排除する(§4.4-a)。
+        tlock = DATA / f".run-{_safe_task_id(task_id)}.lock"
+        try:
+            os.close(os.open(str(tlock), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            print(f"このタスクは既に実行中です({tlock.name})。完了待ち、または残留なら削除してください。")
             return 1
-        _run_task_to_completion(task, cfg)
-        (DATA / ".run.lock").unlink(missing_ok=True)
+        try:
+            task = next((t for t in parse_tasks() if t.get("id") == task_id), None)
+            if not task:
+                print(f"タスクが見つかりません: {task_id}")
+                return 1
+            _run_task_to_completion(task, cfg)
+        finally:
+            tlock.unlink(missing_ok=True)
+            (DATA / ".run.lock").unlink(missing_ok=True)  # 単一 run 後方互換マーカーを掃除
         return 0
 
     print(f"▶ 並列実行(max_concurrency={max_concurrency})。todo を順に claim します …")
