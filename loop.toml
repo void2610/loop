@@ -12,6 +12,13 @@ max_turns = 40
 max_budget_usd = 2.0
 timeout_seconds = 1800
 
+# リトライ(人間送り=handoff を極力減らす)。
+# verifier_attempts: Verifier が判定不能(handoff)のとき read-only のまま再判定する回数。冪等で安全。
+# max_attempts: 実装が timeout/error で確定しなかったとき run 全体を再試行する上限(冪等タスク前提)。
+#   決定済みの pass/fail は再試行しない。非冪等タスクは TODO 側に max_attempts: 1 を指定する。
+verifier_attempts = 3
+max_attempts = 2
+
 # タスクが allowed_tools を指定しなかった場合のフォールバック。
 # -p モードでは未許可ツールは(尋ねられず)拒否されるため、コード探索の Grep/Glob も入れておく。
 default_allowed_tools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]

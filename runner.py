@@ -557,6 +557,84 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
 
 # --- コマンド ---
 
+def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[str, bool]:
+    """1 試行(Explorer→Implementer→決定論テスト→Verifier)。(final, retryable) を返す。
+    retryable=True は「実装が timeout/error で確定しなかった」= run 全体を再試行する価値がある状態。
+    Verifier の handoff(判定不能)は read-only のまま内部で再判定する(冪等で安全)。"""
+    loop, agents = cfg["loop"], cfg["agents"]
+    run_dir = RUNS / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    repo = repo_root(cfg)
+    wt, branch = add_worktree(repo, run_id)
+    try:
+        # 1) Explorer(read-only、失敗は致命でない)
+        print("  · Explorer 調査中 …")
+        e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
+                               agents["explorer_model"], agents["explorer_tools"], run_dir)
+        explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
+
+        # 2) Implementer(read-write、ここが本作業)
+        print("  · Implementer 実装中 …")
+        i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
+        i_result, i_hint = run_role("implementer", render_implementer_prompt(task, explorer_findings),
+                                    wt, cfg, agents["implementer_model"], i_tools, run_dir)
+        copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
+        capture_diff(wt, run_dir)
+
+        verifier_obj = None
+        retryable = False
+        if i_hint == "timeout":
+            final, test_verdict, verifier_verdict, vcode = "timeout", "none", "handoff", None
+            retryable = True
+        elif i_hint == "error":
+            final, test_verdict, verifier_verdict, vcode = "fail", "none", "handoff", None
+            retryable = True
+        else:
+            # 3) 決定論テスト(証拠)
+            test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"
+            # 4) Verifier(別モデル、read-only、構造化出力)。handoff の間は再判定(冪等で安全)。
+            vmax = int(loop.get("verifier_attempts", 3))
+            diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
+            tp = run_dir / "test-output.txt"
+            test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+            verifier_verdict = "handoff"
+            for vatt in range(1, vmax + 1):
+                print(f"  · Verifier {'判定中' if vatt == 1 else f'再判定 {vatt}/{vmax}'} …")
+                v_result, v_hint = run_role(
+                    "verifier", render_verifier_prompt(task, diff_text, test_output),
+                    wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
+                    extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)])
+                verifier_verdict, verifier_obj = parse_verifier(v_result, v_hint, run_dir)
+                if verifier_verdict != "handoff":
+                    break
+            final = combine_verdict(test_verdict, verifier_verdict)
+
+        # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
+        committed = commit_worktree(wt, f"loop run {run_id} → {final}")
+
+        roles = {}
+        for r in ("explorer", "implementer", "verifier"):
+            p = run_dir / f"{r}.result.json"
+            roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+        md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
+                          test_verdict, verifier_verdict, verifier_obj, roles)
+        update_status(task["id"], final)
+
+        conn = loopdb.connect(DB)
+        loopdb.upsert_md(conn, md)
+        conn.close()
+
+        auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {final}")
+
+        print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
+        branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
+        print(f"  · run MD: {md.relative_to(DATA)} / {branch_note}")
+        return final, retryable
+    finally:
+        remove_worktree(repo, wt)
+
+
 def cmd_run() -> int:
     import os
     cfg = load_config()
@@ -578,79 +656,28 @@ def cmd_run() -> int:
             print("実行可能な todo タスクがありません(TODO.md)。")
             return 0
 
-        now = datetime.now(timezone.utc).astimezone()
-        # 同日リトライでの run_id 衝突(過去 run の上書き)を避けるため時刻まで含める。
-        run_id = f"{now:%Y-%m-%d-%H%M%S}-{task['id']}"
-        run_dir = RUNS / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        started_at = now.isoformat(timespec="seconds")
-
         agents = cfg["agents"]
         if agents["verifier_model"] == agents["implementer_model"]:
             print("  ! 警告: verifier_model が implementer_model と同一。別モデルにすべき(記事の Sub-agents の肝)。")
 
-        print(f"▶ run: {run_id}")
-        repo = repo_root(cfg)
-        wt, branch = add_worktree(repo, run_id)
-        try:
-            # 1) Explorer(read-only、失敗は致命でない)
-            print("  · Explorer 調査中 …")
-            e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
-                                   agents["explorer_model"], agents["explorer_tools"], run_dir)
-            explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
+        now = datetime.now(timezone.utc).astimezone()
+        # 同日リトライでの run_id 衝突を避けるため時刻まで含める。再試行は -retryN を付ける。
+        base = f"{now:%Y-%m-%d-%H%M%S}-{task['id']}"
+        started_at = now.isoformat(timespec="seconds")
+        # 実装が timeout/error で確定しなかったときだけ run 全体を再試行(冪等タスク前提)。
+        # 決定済みの pass/fail/handoff は再試行しない。非冪等タスクは task に max_attempts: 1 を指定。
+        max_attempts = int(task.get("max_attempts") or cfg["loop"].get("max_attempts", 2))
 
-            # 2) Implementer(read-write、ここが本作業)
-            print("  · Implementer 実装中 …")
-            i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
-            i_result, i_hint = run_role("implementer", render_implementer_prompt(task, explorer_findings),
-                                        wt, cfg, agents["implementer_model"], i_tools, run_dir)
-            copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
-            capture_diff(wt, run_dir)
-
-            verifier_obj = None
-            if i_hint == "timeout":
-                final, test_verdict, verifier_verdict, vcode = "timeout", "none", "handoff", None
-            elif i_hint == "error":
-                final, test_verdict, verifier_verdict, vcode = "fail", "none", "handoff", None
-            else:
-                # 3) 決定論テスト(証拠)
-                test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"
-                # 4) Verifier(別モデル、read-only、構造化出力)
-                print("  · Verifier 判定中 …")
-                diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
-                tp = run_dir / "test-output.txt"
-                test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
-                v_result, v_hint = run_role(
-                    "verifier", render_verifier_prompt(task, diff_text, test_output),
-                    wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
-                    extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)])
-                verifier_verdict, verifier_obj = parse_verifier(v_result, v_hint, run_dir)
-                final = combine_verdict(test_verdict, verifier_verdict)
-
-            # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
-            committed = commit_worktree(wt, f"loop run {run_id} → {final}")
-
-            roles = {}
-            for r in ("explorer", "implementer", "verifier"):
-                p = run_dir / f"{r}.result.json"
-                roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
-
-            md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
-                              test_verdict, verifier_verdict, verifier_obj, roles)
-            update_status(task["id"], final)
-
-            conn = loopdb.connect(DB)
-            loopdb.upsert_md(conn, md)
-            conn.close()
-
-            auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {final}")
-
-            print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
-            print(f"  · run MD: {md.relative_to(DATA)}（判断は未記入 / reviewed:false）")
-            branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
-            print(f"  · SQLite upsert 済 / data へ自動コミット済 / {branch_note}")
-        finally:
-            remove_worktree(repo, wt)
+        for attempt in range(1, max_attempts + 1):
+            run_id = base if attempt == 1 else f"{base}-retry{attempt}"
+            print(f"▶ run: {run_id}" + ("" if attempt == 1 else f"(再試行 {attempt}/{max_attempts})"))
+            final, retryable = _run_attempt(task, run_id, cfg, started_at)
+            if not retryable:
+                break
+            if attempt == max_attempts:
+                print(f"  · 再試行上限({max_attempts})到達 → final={final} で確定。")
+                break
+            print(f"  · 実装が確定せず({final})。新しい worktree で run 全体を再試行します …")
     finally:
         lock.unlink(missing_ok=True)
     return 0

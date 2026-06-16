@@ -26,7 +26,10 @@
     textarea { width:100%; min-height:3.2rem; resize:vertical; }
     pre { background:#0f1115; padding:.7rem; border-radius:.4rem; overflow:auto; max-height:28rem; }
     .diff .add{color:#9ece6a;} .diff .del{color:#f7768e;} .diff .hd{color:#7aa2f7;}
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:1.4rem; align-items:start; }
+    /* minmax(0,1fr) で各カラムが 0 まで縮められるようにする。1fr のままだと
+       中の <pre> の長い行がカラムを押し広げ、右のレビューUIが画面外に追い出される。 */
+    .grid { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap:1.4rem; align-items:start; }
+    .grid > div { min-width: 0; }
     /* 判断ペイン: 画面の縦いっぱいを使い、テキストエリアで残り高さを分配 */
     .review-pane { position:sticky; top:1rem; height:calc(100vh - 5rem);
                    display:flex; flex-direction:column; min-height:0; }
