@@ -2,7 +2,8 @@
 {% block title %}{{run_id}} — loop{% endblock %}
 {% block body %}
 <p><a href="/">← 一覧</a></p>
-<h2>{{run_id}} <span class="pill {{fm.verdict}}">{{fm.verdict}}</span>
+<h2><span class="repo-badge {{ 'norepo' if (fm.repo or '')|lower == 'none' else '' }}">{{ repo_label(fm.repo) }}</span>
+    {{run_id}} <span class="pill {{fm.verdict}}">{{fm.verdict}}</span>
     {% if fm.reviewed in ("true","1") %}<span class="pill">reviewed ✓</span>{% else %}<span class="pill muted">未レビュー</span>{% endif %}</h2>
 
 <div class="grid">

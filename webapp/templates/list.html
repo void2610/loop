@@ -17,16 +17,16 @@
 </form>
 
 <table>
-  <thead><tr><th>run</th><th>verdict</th><th>rev</th><th>cost</th><th>turns</th><th>skill</th><th>started</th></tr></thead>
+  <thead><tr><th>repo</th><th>run</th><th>verdict</th><th>rev</th><th>cost</th><th>turns</th><th>started</th></tr></thead>
   <tbody>
   {% for r in rows %}
     <tr>
+      <td><span class="repo-badge {{ 'norepo' if (r.repo or '')|lower == 'none' else '' }}">{{ repo_label(r.repo) }}</span></td>
       <td><a href="/run/{{r.run_id}}">{{r.run_id}}</a></td>
       <td class="{{r.verdict}}">{{r.verdict}}</td>
       <td>{{ "✓" if r.reviewed else "·" }}</td>
       <td>{{ "$%.3f"|format(r.cost_usd) if r.cost_usd is not none else "" }}</td>
       <td>{{r.turns or ""}}</td>
-      <td class="muted">{{ (r.skill_sha or "")[:8] }}</td>
       <td class="muted">{{ (r.started_at or "")[:19] }}</td>
     </tr>
   {% else %}

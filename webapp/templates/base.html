@@ -19,6 +19,13 @@
     tr:hover td { background:#1c1f26; }
     .pass{color:#9ece6a;} .fail{color:#f7768e;} .timeout{color:#e0af68;} .handoff{color:#7dcfff;}
     .pill{padding:0 .4rem;border-radius:.3rem;background:#2a2e37;}
+    /* repo バッジ: task 名と同等以上に目立たせる重要情報 */
+    .repo-badge{display:inline-block;padding:.05rem .55rem;border-radius:.35rem;font-weight:700;
+      background:#243b53;color:#9ec1ff;border:1px solid #36567a;white-space:nowrap;}
+    .repo-badge::before{content:"▣ ";opacity:.7;}
+    .repo-badge.norepo{background:#3a2f1a;color:#e0af68;border-color:#5a4a2a;}
+    .repo-badge.norepo::before{content:"⌂ ";}
+    h2 .repo-badge{font-size:1rem;vertical-align:middle;}
     form.filter { margin:.6rem 0 1rem; display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
     input,select,textarea,button { font:inherit; background:#1c1f26; color:#d7dae0;
            border:1px solid #2a2e37; border-radius:.3rem; padding:.3rem .5rem; }

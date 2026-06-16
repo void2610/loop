@@ -5,7 +5,7 @@
 {% if generated %}<p class="pass">プロンプトから生成しました。内容を確認・修正して保存、または「実行」してください。</p>{% endif %}
 {% if saved %}<p class="pass">保存しました(data repo へコミット済み)。</p>{% endif %}
 
-<h2 style="max-width:60rem">{% if is_new %}新規タスク{% else %}{{ f.task_id }} を編集{% endif %}
+<h2 style="max-width:60rem">{% if not is_new %}<span class="repo-badge {{ 'norepo' if (f.repo or '')|lower == 'none' else '' }}">{{ repo_label(f.repo) }}</span> {% endif %}{% if is_new %}新規タスク{% else %}{{ f.task_id }} を編集{% endif %}
     <span class="muted">(目標契約 / 保存で data/tasks/&lt;id&gt;.md へ書き込み)</span></h2>
 
 <form class="task-form" method="post" action="{% if is_new %}/todo/new{% else %}/todo/{{ f.task_id }}{% endif %}">

@@ -27,6 +27,19 @@ import runner  # noqa: E402
 ROOT = runner.ROOT
 RUNS = runner.RUNS
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+
+
+def _repo_label(raw) -> str:
+    """repo 値を短い表示名に。none→no-repo / パス→basename / 登録名→そのまま / 未指定→default。"""
+    s = "" if raw is None else str(raw).strip()
+    if s == "":
+        return "default"
+    if s.lower() == "none":
+        return "no-repo"
+    return Path(s).name if "/" in s else s
+
+
+templates.env.globals["repo_label"] = _repo_label
 app = FastAPI(title="loop")
 
 
