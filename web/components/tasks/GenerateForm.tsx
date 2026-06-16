@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -11,11 +12,11 @@ import { ApiError, api } from "@/lib/api";
 // 生成役は runner 側で read-only 強制。GUI/BFF は LLM を呼ばず prompt を中継するだけ。
 // repo は必須(推定しない)。auto_run は生成後の即時実行トグル。
 export function GenerateForm({ repos }: { repos: string[] }) {
+  const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [repo, setRepo] = useState("");
   const [autoRun, setAutoRun] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 'none' は専用選択肢として最後に出すので一覧からは除外する(legacy todo_new.html 踏襲)。
@@ -35,26 +36,13 @@ export function GenerateForm({ repos }: { repos: string[] }) {
     setSubmitting(true);
     try {
       await api.generate({ prompt, repo, auto_run: autoRun });
-      setAccepted(true);
+      // 一覧へ遷移し「生成中」を可視化(TaskList が generating=1 でポーリング表示)。
+      const q = autoRun ? "generating=1&autorun=1" : "generating=1";
+      router.push(`/tasks?${q}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "生成の起動に失敗しました");
       setSubmitting(false);
     }
-  }
-
-  if (accepted) {
-    return (
-      <div className="max-w-3xl space-y-3">
-        <p className="rounded-md border border-verdict-pass/40 bg-verdict-pass/10 px-3 py-2 text-sm text-verdict-pass">
-          生成を受け付けました(Claude Code がタスクを設計中。数十秒)。
-          {autoRun && " 生成後そのまま実行されます。"}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          完了すると <a className="underline" href="/tasks">タスク一覧</a> に新しい目標契約が現れます。
-          内容を確認・修正してから実行してください。
-        </p>
-      </div>
-    );
   }
 
   return (

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 
 import { TaskList } from "@/components/tasks/TaskList";
@@ -20,7 +21,9 @@ export default function TasksPage() {
           <Button>＋ 新規</Button>
         </Link>
       </div>
-      <TaskList />
+      <Suspense fallback={<p className="text-sm text-muted-foreground">読み込み中…</p>}>
+        <TaskList />
+      </Suspense>
     </div>
   );
 }

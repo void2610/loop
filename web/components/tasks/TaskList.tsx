@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { DeleteTaskButton } from "@/components/tasks/DeleteTaskButton";
 import { RepoBadge } from "@/components/tasks/RepoBadge";
@@ -25,11 +26,15 @@ function verdictVariant(v: string | null | undefined): VerdictVariant {
 }
 
 export function TaskList() {
+  // 生成直後(GenerateForm から ?generating=1 で遷移)はポーリングして新タスク出現を待つ。
+  const generating = useSearchParams().get("generating") === "1";
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [last, setLast] = useState<Record<string, LastRun>>({});
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [genActive, setGenActive] = useState(generating);
+  const baseline = useRef<number | null>(null); // 初回件数。件数増 = 新タスク出現
 
   const load = useCallback(async () => {
     try {
@@ -38,6 +43,8 @@ export function TaskList() {
       setLast(res.last);
       setRunning(res.running);
       setError(null);
+      if (baseline.current === null) baseline.current = res.tasks.length;
+      else if (res.tasks.length > baseline.current) setGenActive(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "タスク一覧の取得に失敗しました");
     } finally {
@@ -48,6 +55,17 @@ export function TaskList() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 生成中は 3s ごとにポーリング。安全弁として最大 90s で打ち切る(生成は通常数十秒)。
+  useEffect(() => {
+    if (!genActive) return;
+    const iv = setInterval(() => void load(), 3000);
+    const to = setTimeout(() => setGenActive(false), 90000);
+    return () => {
+      clearInterval(iv);
+      clearTimeout(to);
+    };
+  }, [genActive, load]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">読み込み中…</p>;
@@ -62,6 +80,13 @@ export function TaskList() {
 
   return (
     <div className="space-y-3">
+      {genActive && (
+        <p className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-sm text-primary">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
+          ⏳ タスクを生成中(Claude Code が目標契約を設計中・数十秒)。完了すると下の一覧に現れます。
+        </p>
+      )}
+
       {running && (
         <p className="rounded-md border border-verdict-handoff/40 bg-verdict-handoff/10 px-3 py-2 text-sm text-verdict-handoff">
           ● run 実行中(data/.run.lock)。完了まで新規実行は待機されます。
