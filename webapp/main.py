@@ -100,6 +100,23 @@ def judge(run_id: str, trust: str = Form(""), risk: str = Form(""),
     return RedirectResponse(f"/run/{run_id}", status_code=303)
 
 
+@app.get("/todo", response_class=HTMLResponse)
+def todo_get(request: Request, saved: int = 0):
+    content = runner.TODO.read_text(encoding="utf-8") if runner.TODO.exists() else ""
+    return templates.TemplateResponse(request, "todo.html", {
+        "content": content, "tasks": runner.parse_tasks(), "saved": bool(saved),
+    })
+
+
+@app.post("/todo")
+def todo_post(content: str = Form("")):
+    # TODO は契約ファイル。GUI はテキストエリアの内容をそのまま書き戻す(判断の生成はしない)。
+    runner.TODO.parent.mkdir(parents=True, exist_ok=True)
+    runner.TODO.write_text(content.replace("\r\n", "\n"), encoding="utf-8")
+    runner.auto_commit(runner.DATA, [runner.TODO], "todo: Web GUI から編集")
+    return RedirectResponse("/todo?saved=1", status_code=303)
+
+
 def _parse_transcript(path: Path) -> list[dict]:
     """セッション JSONL を会話イベント列に畳む(user/assistant のみ。ノイズ行は捨てる)。"""
     events: list[dict] = []
