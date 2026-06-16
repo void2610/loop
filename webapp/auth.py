@@ -134,6 +134,9 @@ class AuthConfig:
 
         # SSE signed token 用の鍵が無いときは、トークンのハッシュ群から導出(再起動毎に安定)
         if not self.secret and self.tokens:
+            print("  ! 警告: LOOP_AUTH_SECRET 未設定。SSE 署名鍵をトークンから導出します"
+                  "(トークン差し替えで既発行 SSE token が失効)。本番は secret を明示してください。",
+                  file=sys.stderr)
             self.secret = hashlib.sha256("|".join(t.hash for t in self.tokens).encode()).digest()
 
     def has_tokens(self) -> bool:
@@ -401,5 +404,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         if "read" not in self._scope_of(request, cfg, actor):
             return JSONResponse({"error": "forbidden", "detail": "read scope が必要"}, status_code=403)
+        # token 発行も状態を作る POST。リモート主体には write 系と同じ Origin 制約を課す(CSRF 対称性)
+        if not _is_loopback(request) and not _origin_allowed(request, cfg):
+            return JSONResponse({"error": "forbidden", "detail": "Origin 不許可"}, status_code=403)
         token = issue_sse_token(actor)
         return JSONResponse({"token": token, "expires_in": _SSE_TOKEN_TTL_SEC})
