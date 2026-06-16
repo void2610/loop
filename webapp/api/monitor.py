@@ -1,8 +1,10 @@
-"""監視(snapshot + ライブ) + SSE 枠。§2.1 #7-8 と SSE 予約。
+"""監視(snapshot + ライブ) + SSE。§2.1 #7-8 と SSE 本実装。
 
-SSE は本実装(role別 tail・並行 run 多重化)は WS4。ここは経路と最小1イベントだけ凍結。
-per-run ステータスは runs/<id>/status.json を run_id キーで読む契約に固定(§8.1.3)。
+per-run ステータスは run_id キーで読む契約(util.read_run_status(run_id))に固定(§8.1.3)。
 SSE は事実イベントの追記専用。判断・要約を一切流さない(§2.3 / §2.6)。
+方式: ファイル(.run.lock / runs/<id>/<role>.stream.jsonl / runs/*.md)を一定間隔で観測し、
+差分(新 transcript 行・phase 変化・新 run 出現)だけを push する。claude -p の stream は
+ファイルへ逐次書かれるので、それを tail して near-real-time に配信する。
 """
 
 from __future__ import annotations
@@ -10,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from .. import schemas, util
@@ -20,6 +22,8 @@ from ._deps import valid_run_id
 router = APIRouter(tags=["monitor"])
 
 _PHASES = [["explorer", "Explorer"], ["implementer", "Implementer"], ["verifier", "検証/Verifier"]]
+_ROLES = ("explorer", "implementer", "verifier")
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
 
 
 def _sse(event: str, data) -> str:
@@ -54,29 +58,76 @@ def run_live(run_id: str = Depends(valid_run_id)):
     return schemas.LiveSnapshot(run_id=run_id, status=status, active=active, roles=roles)
 
 
+def _run_ids() -> set[str]:
+    return {p.stem for p in util.RUNS.glob("*.md")} if util.RUNS.exists() else set()
+
+
 @router.get("/stream/monitor")
-def stream_monitor():
-    """monitor 全体の SSE 枠。event: status / run_done / heartbeat(本実装は WS4)。"""
+async def stream_monitor(request: Request):
+    """monitor 全体の SSE。status 変化 / 新 run 出現(run_done)/ heartbeat を継続配信。"""
 
     async def gen():
-        # P0 凍結: 接続直後に現状 status を1本流して経路を確定する
-        yield _sse("status", util.read_run_status())
-        yield _sse("heartbeat", {"t": 0})
-        await asyncio.sleep(0)
+        last_status = None  # 直近に送った status の JSON 文字列(変化検出用)
+        known = _run_ids()  # 既知の run。初回スナップショットは run_done にしない
+        beat = 0
+        # 接続直後に現状を1本(フロントの「未接続」を即解消)
+        cur = util.read_run_status()
+        last_status = json.dumps(cur, ensure_ascii=False, sort_keys=True)
+        yield _sse("status", cur)
+        while True:
+            if await request.is_disconnected():
+                return
+            cur = util.read_run_status()
+            snap = json.dumps(cur, ensure_ascii=False, sort_keys=True)
+            if snap != last_status:
+                last_status = snap
+                yield _sse("status", cur)
+            now = _run_ids()
+            for rid in sorted(now - known):
+                yield _sse("run_done", {"run_id": rid})
+            known = now
+            beat += 1
+            yield _sse("heartbeat", {"t": beat})
+            await asyncio.sleep(2)
 
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 @router.get("/runs/{run_id}/stream")
-def stream_run(run_id: str = Depends(valid_run_id)):
-    """進行中 run のライブ transcript SSE 枠。event: event / phase / end(本実装は WS4)。"""
+async def stream_run(request: Request, run_id: str = Depends(valid_run_id)):
+    """進行中 run のライブ transcript SSE。role別 stream.jsonl を tail して event/phase/end を配信。"""
+    rd = util.RUNS / run_id
 
     async def gen():
-        status = util.read_run_status(run_id)
-        yield _sse("phase", {"phase": (status or {}).get("phase", "start")})
-        yield _sse("end", {"run_id": run_id})
-        await asyncio.sleep(0)
+        counts = {r: 0 for r in _ROLES}  # role ごとに送信済みイベント数(差分のみ push)
+        last_phase = None
+        beat = 0
+        while True:
+            if await request.is_disconnected():
+                return
+            status = util.read_run_status(run_id)
+            phase = (status or {}).get("phase")
+            if phase and phase != last_phase:
+                last_phase = phase
+                yield _sse("phase", {"phase": phase})
+            for role in _ROLES:
+                sp = rd / f"{role}.stream.jsonl"
+                if not (sp.exists() and sp.stat().st_size > 0):
+                    continue
+                try:
+                    events = util.parse_transcript(sp)
+                except OSError:
+                    continue
+                if len(events) > counts[role]:
+                    for ev in events[counts[role]:]:
+                        yield _sse("event", {**ev, "role": role})
+                    counts[role] = len(events)
+            # 終了判定: 進行ステータスが消え(.run.lock 解放)run MD が出ている = 完了
+            if status is None and (util.RUNS / f"{run_id}.md").exists():
+                yield _sse("end", {"run_id": run_id})
+                return
+            beat += 1
+            yield _sse("heartbeat", {"t": beat})
+            await asyncio.sleep(1)
 
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=_SSE_HEADERS)

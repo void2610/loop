@@ -11,6 +11,7 @@ data/ の MD と git にのみ着地。FastAPI は import runner / import loopdb
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
 from webapp import legacy  # noqa: E402
@@ -26,6 +28,21 @@ from webapp.auth import AuthMiddleware  # noqa: E402
 
 app = FastAPI(title="loop")
 app.add_middleware(AuthMiddleware)  # P0: 127.0.0.1 のみ通す no-op(実体は WS6)
+
+# SSE はブラウザ→FastAPI 直(クロスオリジン)。EventSource 接続のため CORS を許可する。
+# JSON は Next の同一オリジン rewrite 経由なので CORS 不要。許可元は dev 既定 + env で上書き。
+_origins_env = os.environ.get("LOOP_WEB_ORIGINS")
+_allowed_origins = (
+    [o.strip() for o in _origins_env.split(",") if o.strip()]
+    if _origins_env
+    else ["http://localhost:3000", "http://127.0.0.1:3000"]
+)
+app.add_middleware(  # CORS を最外層に(SSE のプリフライト/レスポンスヘッダ付与)
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 app.include_router(api_router)  # /api/* = 新 JSON + SSE 面
 app.include_router(legacy.router)  # /legacy/* = 現 Jinja(退避・無改造)
 
