@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { api, ApiError } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -131,14 +132,20 @@ export function EvidencePanel({ runId }: { runId: string }) {
         ) : null}
 
         {transcript ? (
-          <p className="text-sm">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <Link
+              href={`/runs/${encodeURIComponent(runId)}/transcript`}
+              className="font-medium text-primary hover:underline"
+            >
+              transcript を会話ビューで開く
+            </Link>
             <a
               href={`/api/runs/${encodeURIComponent(runId)}/files/transcript.jsonl`}
               target="_blank"
               rel="noreferrer"
-              className="text-primary hover:underline"
+              className="text-muted-foreground hover:underline"
             >
-              transcript (生 JSONL · {formatBytes(transcript.size)})
+              生 JSONL · {formatBytes(transcript.size)}
             </a>
           </p>
         ) : null}
