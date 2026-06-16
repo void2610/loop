@@ -8,3 +8,10 @@ data/
 # WatchPaths ログ / launchd plist は環境ローカルに生成される
 .watch.log
 launchd/com.loop.watch.plist
+# Next.js フロント(web/)の Node 依存とビルド成果物
+web/node_modules/
+web/.next/
+web/out/
+web/.env.local
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
