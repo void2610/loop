@@ -36,18 +36,18 @@ status:
 init-data:
     mkdir -p data/runs data/plans
     test -d data/.git || git -C data init
-    test -f data/TODO.md || printf '# TODO — 目標契約キュー\n' > data/TODO.md
+    mkdir -p data/tasks
     test -f data/review-notes.md || printf '# review-notes — 種類B の R&D ログ\n' > data/review-notes.md
-    @echo "data/ を private git repo として初期化しました。push しないか private remote に紐づけてください。"
+    @echo "data/ を private git repo として初期化しました。data/tasks/<id>.md にタスクを置きます。"
 
-# WatchPaths(data/TODO.md 変更で run 起動)を導入 / 解除。example からローカルパスを埋めて生成
+# WatchPaths(data/tasks/ 変更で run 起動)を導入 / 解除。example からローカルパスを埋めて生成
 watch-install:
     sed -e "s|__LOOP_DIR__|$(pwd)|g" -e "s|__UV__|$(command -v uv)|g" \
         launchd/com.loop.watch.plist.example > launchd/com.loop.watch.plist
     cp launchd/com.loop.watch.plist ~/Library/LaunchAgents/com.loop.watch.plist
     launchctl unload ~/Library/LaunchAgents/com.loop.watch.plist 2>/dev/null || true
     launchctl load ~/Library/LaunchAgents/com.loop.watch.plist
-    @echo "WatchPaths 有効化。data/TODO.md を保存すると runner が起動します。"
+    @echo "WatchPaths 有効化。data/tasks/ を変更すると runner が起動します。"
 
 watch-uninstall:
     launchctl unload ~/Library/LaunchAgents/com.loop.watch.plist 2>/dev/null || true

@@ -15,7 +15,7 @@
   </array>
   <key>WatchPaths</key>
   <array>
-    <string>__LOOP_DIR__/data/TODO.md</string>
+    <string>__LOOP_DIR__/data/tasks</string>
   </array>
   <key>RunAtLoad</key>
   <false/>

@@ -46,7 +46,7 @@ def _data_dir() -> Path:
 
 # データ系のパスは data_dir 配下に置く(エンジン=公開 repo とは別の git repo)。
 DATA = _data_dir()
-TODO = DATA / "TODO.md"
+TASKS_DIR = DATA / "tasks"   # 1 タスク = 1 ファイル(data/tasks/<id>.md、YAML front-matter)
 RUNS = DATA / "runs"
 DB = DATA / "loop.db"
 REVIEW_NOTES = DATA / "review-notes.md"
@@ -54,34 +54,40 @@ REVIEW_NOTES = DATA / "review-notes.md"
 JUDGMENT_HEADING = "## 判断"
 
 
-# --- TODO.md パース(```yaml フェンスブロック = 1 タスク) ---
+# --- タスク = 1 ファイル(data/tasks/<id>.md、YAML front-matter) ---
+
+def _split_front_matter(text: str) -> tuple[list[str], int, int]:
+    """(lines, fm_start, fm_end) を返す。fm は lines[fm_start:fm_end](--- の内側)。"""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return lines, 0, 0
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), len(lines))
+    return lines, 1, end
+
 
 def parse_tasks() -> list[dict]:
-    if not TODO.exists():
-        return []
-    lines = TODO.read_text(encoding="utf-8").splitlines()
+    """data/tasks/*.md を走査し front-matter をタスクとして読む(ファイル名昇順=実行順)。
+    `_` や `.` で始まるファイル(テンプレ/隠し)はスキップ。"""
     tasks: list[dict] = []
-    i = 0
-    while i < len(lines):
-        stripped = lines[i].strip()
-        if stripped.startswith("```") and "yaml" in stripped:
-            inner_start = i + 1
-            j = inner_start
-            while j < len(lines) and not lines[j].strip().startswith("```"):
-                j += 1
-            block = "\n".join(lines[inner_start:j])
-            try:
-                data = yaml.safe_load(block) or {}
-            except yaml.YAMLError as e:
-                print(f"  ! YAML パース失敗(無視): {e}", file=sys.stderr)
-                data = {}
-            if isinstance(data, dict) and data.get("id"):
-                data["_inner_start"] = inner_start
-                data["_inner_end"] = j
-                tasks.append(data)
-            i = j + 1
-        else:
-            i += 1
+    if not TASKS_DIR.exists():
+        return tasks
+    for p in sorted(TASKS_DIR.glob("*.md")):
+        if p.name.startswith(("_", ".")):
+            continue
+        text = p.read_text(encoding="utf-8")
+        lines, s, e = _split_front_matter(text)
+        if e == 0:
+            continue  # front-matter なしはタスクではない
+        try:
+            data = yaml.safe_load("\n".join(lines[s:e])) or {}
+        except yaml.YAMLError as ex:
+            print(f"  ! YAML パース失敗(無視) {p.name}: {ex}", file=sys.stderr)
+            continue
+        if not isinstance(data, dict):
+            continue
+        data.setdefault("id", p.stem)
+        data["_path"] = p
+        tasks.append(data)
     return tasks
 
 
@@ -93,20 +99,18 @@ def next_todo(tasks: list[dict]) -> dict | None:
 
 
 def update_status(task_id: str, new_status: str) -> None:
-    tasks = parse_tasks()
-    target = next((t for t in tasks if t.get("id") == task_id), None)
+    target = next((t for t in parse_tasks() if t.get("id") == task_id), None)
     if not target:
         return
-    lines = TODO.read_text(encoding="utf-8").splitlines()
-    inner_start, inner_end = target["_inner_start"], target["_inner_end"]
-    for k in range(inner_start, inner_end):
+    p = target["_path"]
+    lines, s, e = _split_front_matter(p.read_text(encoding="utf-8"))
+    for k in range(s, e):
         if lines[k].split(":", 1)[0].strip() == "status":
-            indent = lines[k][: len(lines[k]) - len(lines[k].lstrip())]
-            lines[k] = f"{indent}status: {new_status}"
+            lines[k] = f"status: {new_status}"
             break
     else:
-        lines.insert(inner_start, f"status: {new_status}")
-    TODO.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        lines.insert(e, f"status: {new_status}")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def goal_contract_sha(task: dict) -> str:
@@ -216,7 +220,7 @@ def commit_worktree(wt: Path, message: str) -> bool:
 
 def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
     """種類A: チェックポイントコミット。loop.db(ビュー)は .gitignore 済みなので入らない。"""
-    rels = [str(p.relative_to(repo)) for p in paths if p.exists()]
+    rels = [str(p.relative_to(repo)) for p in paths if p and p.exists()]
     if not rels:
         return
     git(repo, "add", *rels)
@@ -625,7 +629,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         loopdb.upsert_md(conn, md)
         conn.close()
 
-        auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {final}")
+        auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → {final}")
 
         print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
         branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
@@ -653,7 +657,7 @@ def cmd_run() -> int:
     try:
         task = next_todo(parse_tasks())
         if not task:
-            print("実行可能な todo タスクがありません(TODO.md)。")
+            print("実行可能な todo タスクがありません(data/tasks/)。")
             return 0
 
         agents = cfg["agents"]

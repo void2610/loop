@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}TODO — loop{% endblock %}
+{% block body %}
+<h2>タスク <span class="muted">(data/tasks/ — {{ tasks|length }} 件)</span> <a href="/todo/new">＋ 新規</a></h2>
+<table>
+  <thead><tr><th>id</th><th>status</th><th>goal</th><th></th></tr></thead>
+  <tbody>
+  {% for t in tasks %}
+    <tr>
+      <td><a href="/todo/{{ t.id }}">{{ t.id }}</a></td>
+      <td class="{{ t.status or 'todo' }}">{{ t.status or 'todo' }}</td>
+      <td class="muted">{{ (t.goal or '').split('\n')[0] }}</td>
+      <td>
+        <form method="post" action="/todo/{{ t.id }}/delete" onsubmit="return confirm('{{ t.id }} を削除しますか?(git 履歴には残ります)')">
+          <button type="submit">削除</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">タスクがありません。「＋ 新規」で追加してください。</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">実行順はファイル名昇順(先頭の todo が次に実行される)。名前で優先度を制御(例: 01-foo)。</p>
+{% endblock %}

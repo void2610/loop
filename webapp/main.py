@@ -100,21 +100,85 @@ def judge(run_id: str, trust: str = Form(""), risk: str = Form(""),
     return RedirectResponse(f"/run/{run_id}", status_code=303)
 
 
+import re  # noqa: E402
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+NEW_TASK_TEMPLATE = """---
+goal: |
+  <ここに目標を書く>
+accept:
+  - <数値で二値判定できる受け入れ基準>
+verify: <決定論の検証コマンド。exit 0 = pass。無ければ Verifier 判定に委ねる>
+constraints:
+  - <制約があれば。無ければこの行ごと消す>
+allowed_tools: Read,Edit,Write,Grep,Glob,Bash
+status: todo
+---
+
+<自由メモ>
+"""
+
+
+def _task_path(task_id: str):
+    """id を安全な data/tasks/<id>.md パスに変換。不正なら None。"""
+    if not task_id or not _SAFE_ID.match(task_id) or task_id.startswith(("_", ".")) or "/" in task_id:
+        return None
+    return runner.TASKS_DIR / f"{task_id}.md"
+
+
 @app.get("/todo", response_class=HTMLResponse)
-def todo_get(request: Request, saved: int = 0):
-    content = runner.TODO.read_text(encoding="utf-8") if runner.TODO.exists() else ""
-    return templates.TemplateResponse(request, "todo.html", {
-        "content": content, "tasks": runner.parse_tasks(), "saved": bool(saved),
-    })
+def todo_list(request: Request):
+    return templates.TemplateResponse(request, "todo_list.html", {"tasks": runner.parse_tasks()})
 
 
-@app.post("/todo")
-def todo_post(content: str = Form("")):
-    # TODO は契約ファイル。GUI はテキストエリアの内容をそのまま書き戻す(判断の生成はしない)。
-    runner.TODO.parent.mkdir(parents=True, exist_ok=True)
-    runner.TODO.write_text(content.replace("\r\n", "\n"), encoding="utf-8")
-    runner.auto_commit(runner.DATA, [runner.TODO], "todo: Web GUI から編集")
-    return RedirectResponse("/todo?saved=1", status_code=303)
+@app.get("/todo/new", response_class=HTMLResponse)
+def todo_new(request: Request):
+    return templates.TemplateResponse(request, "todo_edit.html", {
+        "task_id": "", "content": NEW_TASK_TEMPLATE, "is_new": True, "saved": False})
+
+
+@app.get("/todo/{task_id}", response_class=HTMLResponse)
+def todo_edit(request: Request, task_id: str, saved: int = 0):
+    p = _task_path(task_id)
+    if not p or not p.exists():
+        return HTMLResponse(f"task not found: {task_id}", status_code=404)
+    return templates.TemplateResponse(request, "todo_edit.html", {
+        "task_id": task_id, "content": p.read_text(encoding="utf-8"), "is_new": False, "saved": bool(saved)})
+
+
+@app.post("/todo/new")
+def todo_create(task_id: str = Form(""), content: str = Form("")):
+    p = _task_path(task_id.strip())
+    if not p:
+        return HTMLResponse("不正な id です(英数字と . _ - のみ、先頭は英数字)。", status_code=400)
+    if p.exists():
+        return HTMLResponse(f"既に存在します: {task_id}", status_code=409)
+    runner.TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    p.write_text((content or NEW_TASK_TEMPLATE).replace("\r\n", "\n"), encoding="utf-8")
+    runner.auto_commit(runner.DATA, [p], f"todo: {task_id} を新規作成")
+    return RedirectResponse(f"/todo/{task_id}?saved=1", status_code=303)
+
+
+@app.post("/todo/{task_id}")
+def todo_save(task_id: str, content: str = Form("")):
+    p = _task_path(task_id)
+    if not p:
+        return HTMLResponse("invalid id", status_code=400)
+    runner.TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    p.write_text(content.replace("\r\n", "\n"), encoding="utf-8")
+    runner.auto_commit(runner.DATA, [p], f"todo: {task_id} を編集")
+    return RedirectResponse(f"/todo/{task_id}?saved=1", status_code=303)
+
+
+@app.post("/todo/{task_id}/delete")
+def todo_delete(task_id: str):
+    p = _task_path(task_id)
+    if p and p.exists():
+        p.unlink()
+        runner.git(runner.DATA, "add", "-A", "--", "tasks")
+        runner.git(runner.DATA, "commit", "-q", "-m", f"todo: {task_id} を削除")
+    return RedirectResponse("/todo", status_code=303)
 
 
 def _parse_transcript(path: Path) -> list[dict]:

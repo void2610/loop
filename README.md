@@ -41,7 +41,8 @@ clone 後に1回:
 | SQLite を MD から完全再生成 | `just reindex` | A |
 | DuckDB 分析(canned / ad-hoc) | `just stats` / `just stats-sql "SELECT …"` | A |
 | verdict・reviewed 一覧 | `just status` | A |
-| TODO.md 変更で自動起動(opt-in) | `just watch-install` / `just watch-uninstall` | A |
+| タスク(目標契約)の確認・編集・新規作成 | Web GUI `/todo`(`data/tasks/*.md` を編集) | A/契約 |
+| tasks 変更で自動起動(opt-in) | `just watch-install` / `just watch-uninstall` | A |
 
 ### レビュー(種類B)の流れ — Web GUI(v4 既定)
 
@@ -56,7 +57,7 @@ clone 後に1回:
 
 ## 1 run の流れ(runner.py / 種類A)
 
-`TODO.md` パース → `git worktree` 隔離 → **3役 Sub-agents** → 自動チェックポイントコミット(成果を `loop/<id>` ブランチへ)→ `runs/<id>.md` 生成(front-matter・証拠・判断は空 / `reviewed:false`)→ SQLite upsert → worktree 後始末。
+`data/tasks/*.md`(1 タスク=1 ファイル)から次の `todo` を選択 → `git worktree` 隔離 → **3役 Sub-agents** → 自動チェックポイントコミット(成果を `loop/<id>` ブランチへ)→ `runs/<id>.md` 生成(front-matter・証拠・判断は空 / `reviewed:false`)→ SQLite upsert → worktree 後始末。
 
 3役(記事の Sub-agents モジュール。`[agents]` でモデル/ツールを指定):
 
@@ -66,6 +67,8 @@ clone 後に1回:
 4. **Verifier**(**別モデル必須** / read-only / 構造化出力)— 自己申告を信じず受け入れ基準を独立判定。test gaming / 部分未達を疑う。→ `verifier_verdict ∈ {pass, fail, handoff}`。
 
 最終 verdict = `combine(test, verifier)`: test=fail なら fail / verifier=fail なら fail(テスト緑でも gaming を捕捉)/ verifier=handoff なら handoff / それ以外 pass。Verifier の判定は **事実セクション**に記録し、`## 判断`(種類B)は空のまま人間が書く。
+
+**リトライ**(人間送り=handoff を減らす): Verifier が handoff(判定不能)を返す間 read-only のまま `verifier_attempts` 回まで再判定(冪等で安全)。実装が timeout/error で確定しなかったときだけ `max_attempts` まで run 全体を再試行(冪等タスク前提。決定済みの pass/fail は再試行しない。非冪等タスクは `max_attempts: 1`)。
 
 - 停止条件: turn 上限 `--max-turns`(暴走の一次ガード)+ `--max-budget-usd` + wall-clock タイムアウトの3段。各役呼び出しに効く。
 - コストは約3倍(1 run = 3 モデル呼び出し)。`verifier_model` は `implementer_model` と別にすること(同一なら起動時警告)。
@@ -86,7 +89,7 @@ clone 後に1回:
   .claude/skills/    SKILL.md(ネイティブ、git 管理、SHA を run に記録)
 
 data/(別の private git repo / .gitignore):
-  TODO.md            目標契約キュー(```yaml ブロック。数値で二値判定できる verify 必須)
+  tasks/<id>.md      目標契約(1 タスク=1 ファイル / YAML front-matter)。名前昇順=実行順
   review-notes.md    種類B の R&D ログ(failure mode → 入れるべき自動チェック)
   runs/<id>.md       ★契約: run レコード(真実の源)
   runs/<id>/         ★契約: 証拠(result.json / test-output.txt / change.patch / transcript.jsonl)

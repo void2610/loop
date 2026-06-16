@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ "新規タスク" if is_new else task_id }} — TODO — loop{% endblock %}
+{% block body %}
+<p><a href="/todo">← タスク一覧</a></p>
+{% if saved %}<p class="pass">保存しました(data repo へコミット済み)。</p>{% endif %}
+
+<div class="review-pane">
+  <h2>{% if is_new %}新規タスク{% else %}{{ task_id }} を編集{% endif %}
+      <span class="muted">(契約ファイル / 保存で data repo へコミット)</span></h2>
+  <form class="judgment-form" method="post" action="{% if is_new %}/todo/new{% else %}/todo/{{ task_id }}{% endif %}">
+    {% if is_new %}
+    <p><label for="task_id">id(ファイル名 = data/tasks/&lt;id&gt;.md。英数字と . _ -)</label>
+       <input id="task_id" name="task_id" placeholder="例: fix-flaky-test" required pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></p>
+    {% endif %}
+    <textarea name="content" spellcheck="false">{{ content }}</textarea>
+    <div class="actions">
+      <p class="muted">YAML front-matter(--- で囲む)で目標契約を書く。数値で二値判定できる verify を必須に。id 行は省略可(ファイル名が id)。</p>
+      <button type="submit">{% if is_new %}作成{% else %}保存{% endif %}(data/tasks/ へ書き込み)</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
