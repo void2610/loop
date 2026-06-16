@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{run_id}} — loop{% endblock %}
+{% block body %}
+<p><a href="/">← 一覧</a></p>
+<h2>{{run_id}} <span class="pill {{fm.verdict}}">{{fm.verdict}}</span>
+    {% if fm.reviewed in ("true","1") %}<span class="pill">reviewed ✓</span>{% else %}<span class="pill muted">未レビュー</span>{% endif %}</h2>
+
+<div class="grid">
+  <div>
+    <h3>front-matter</h3>
+    <dl>{% for k,v in fm.items() %}<dt>{{k}}</dt><dd>{{v}}</dd>{% endfor %}</dl>
+
+    <h3>エージェントがやったこと <span class="muted">(runner の事実要約)</span></h3>
+    <pre>{{ summary or "(最終出力なし)" }}</pre>
+
+    <h3>証拠</h3>
+    {% if evidence["test-output.txt"] %}
+      <p>検証出力 (test-output.txt)</p>
+      <pre>{{ evidence["test-output.txt"] }}</pre>
+    {% endif %}
+    {% if evidence["change.patch"] %}
+      <p>diff (change.patch)</p>
+      <pre class="diff">{% for line in evidence["change.patch"].splitlines() %}<span class="{% if line.startswith('+') and not line.startswith('+++') %}add{% elif line.startswith('-') and not line.startswith('---') %}del{% elif line.startswith('@@') or line.startswith('diff') %}hd{% endif %}">{{ line }}</span>
+{% endfor %}</pre>
+    {% endif %}
+    {% if evidence.transcript %}<p><a href="/run/{{run_id}}/transcript">transcript を読む</a> <a href="/run/{{run_id}}/file/transcript.jsonl" target="_blank" class="muted">(生 JSONL)</a></p>{% endif %}
+  </div>
+
+  <div>
+    <h3>判断 <span class="muted">(種類B / あなたが書く。GUI は生成・提案しない)</span></h3>
+    <form method="post" action="/run/{{run_id}}/judge">
+      <fieldset>
+      {% for key,label in fields %}
+        <label for="{{key}}">{{label}}</label>
+        <textarea id="{{key}}" name="{{key}}">{{ judgment[key] }}</textarea>
+      {% endfor %}
+      </fieldset>
+      <p class="muted">submit すると runs/{{run_id}}.md に書き戻し、「自動検証に入れるべきチェック」は review-notes.md に追記、reviewed 化・コミット・再インデックスを自動実行します。</p>
+      <button type="submit">判断を保存(契約ファイルへ書き込み)</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

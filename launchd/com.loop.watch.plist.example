@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WatchPaths トリガー(event-driven)。data/TODO.md 変更時に `runner.py run` を1回起動する。
+     timer ベースの無人 cadence ではない。`just watch-install` が __LOOP_DIR__ / __UV__ を実環境の
+     パスに置換して com.loop.watch.plist を生成し、~/Library/LaunchAgents へ配置する。 -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.loop.watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>cd __LOOP_DIR__ &amp;&amp; __UV__ run runner.py run</string>
+  </array>
+  <key>WatchPaths</key>
+  <array>
+    <string>__LOOP_DIR__/data/TODO.md</string>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__LOOP_DIR__/.watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOOP_DIR__/.watch.log</string>
+</dict>
+</plist>

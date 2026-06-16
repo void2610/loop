@@ -1,0 +1,25 @@
+# Loop Engineering 計測配管の設定
+# 実行系はネイティブ(claude -p / git worktree)。ここは計測の境界条件だけを宣言する。
+
+[loop]
+# headless 実行に使うモデル(エイリアス可)。タスク側で上書きできる。
+model = "claude-sonnet-4-6"
+
+# 停止条件。--max-turns は現行 CLI に無いため、予算上限と wall-clock タイムアウトで止める。
+max_budget_usd = 2.0
+timeout_seconds = 1800
+
+# タスクが allowed_tools を指定しなかった場合のフォールバック。スコープは狭く保つ。
+default_allowed_tools = ["Read", "Edit", "Write", "Bash"]
+
+# permission-mode。default だと未認可ツールはブロックされる(承認する人間がいないため)。
+permission_mode = "default"
+
+[repo]
+# worktree を切る対象リポジトリ。"." はこの loop ディレクトリ自身。
+path = "."
+
+[data]
+# 契約データ(TODO.md / runs/ / review-notes.md / loop.db)の置き場。
+# エンジン(公開 repo)とは別の private git repo にする。エンジン側は data/ を .gitignore する。
+dir = "data"

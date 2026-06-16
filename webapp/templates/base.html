@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}loop{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+           margin: 0; padding: 1.2rem 1.6rem; background:#16181d; color:#d7dae0; }
+    a { color:#7aa2f7; text-decoration:none; } a:hover { text-decoration:underline; }
+    h1,h2,h3 { color:#c0caf5; } h1 { font-size:1.1rem; }
+    table { border-collapse: collapse; width:100%; }
+    th,td { text-align:left; padding:.35rem .6rem; border-bottom:1px solid #2a2e37; white-space:nowrap; }
+    th { color:#9aa5ce; font-weight:600; }
+    tr:hover td { background:#1c1f26; }
+    .pass{color:#9ece6a;} .fail{color:#f7768e;} .timeout{color:#e0af68;} .handoff{color:#7dcfff;}
+    .pill{padding:0 .4rem;border-radius:.3rem;background:#2a2e37;}
+    form.filter { margin:.6rem 0 1rem; display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    input,select,textarea,button { font:inherit; background:#1c1f26; color:#d7dae0;
+           border:1px solid #2a2e37; border-radius:.3rem; padding:.3rem .5rem; }
+    button { cursor:pointer; background:#28304a; }
+    textarea { width:100%; min-height:3.2rem; resize:vertical; }
+    pre { background:#0f1115; padding:.7rem; border-radius:.4rem; overflow:auto; max-height:28rem; }
+    .diff .add{color:#9ece6a;} .diff .del{color:#f7768e;} .diff .hd{color:#7aa2f7;}
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:1.4rem; align-items:start; }
+    .muted{color:#6b7280;} fieldset{border:1px solid #2a2e37;border-radius:.4rem;margin:.4rem 0;}
+    label{display:block;color:#9aa5ce;margin:.5rem 0 .2rem;}
+    dl{display:grid;grid-template-columns:max-content 1fr;gap:.1rem .8rem;margin:0;}
+    dt{color:#9aa5ce;} dd{margin:0;}
+    /* transcript の吹き出し */
+    .msg{border-radius:.5rem;padding:.5rem .8rem;margin:.6rem 0;border:1px solid #2a2e37;}
+    .msg .who{font-size:.8rem;color:#9aa5ce;margin-bottom:.3rem;display:flex;justify-content:space-between;}
+    .msg .body{white-space:pre-wrap;word-break:break-word;}
+    .msg pre{margin:.2rem 0 0;max-height:22rem;}
+    .m-user{border-left:3px solid #7aa2f7;background:#171b24;}
+    .m-assistant{border-left:3px solid #9ece6a;background:#161d18;}
+    .m-think{border-left:3px solid #565f89;background:#15171d;color:#8b93b3;}
+    .m-tool{border-left:3px solid #bb9af7;background:#1a1722;}
+    .m-result{border-left:3px solid #565f89;background:#13151a;}
+    .m-think .who,.m-tool .who{color:#bb9af7;}
+    details>summary{cursor:pointer;color:#9aa5ce;}
+  </style>
+</head>
+<body>
+  <h1><a href="/">loop</a> — Loop Engineering 計測配管</h1>
+  {% block body %}{% endblock %}
+</body>
+</html>

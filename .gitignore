@@ -1,0 +1,10 @@
+.DS_Store
+__pycache__/
+*.pyc
+# worktree はリポジトリ外(../.loop-worktrees)に切るが念のため
+.loop-worktrees/
+# 契約データは別の private git repo(エンジン=公開 repo には含めない)
+data/
+# WatchPaths ログ / launchd plist は環境ローカルに生成される
+.watch.log
+launchd/com.loop.watch.plist
