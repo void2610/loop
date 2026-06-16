@@ -26,6 +26,11 @@ default_allowed_tools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
 # permission-mode。default だと未認可ツールはブロックされる(承認する人間がいないため)。
 permission_mode = "default"
 
+# 同時に走らせる run の本数の上限。デフォルト 1 = 従来の単一直列(.run.lock)と完全等価。
+# 1 を超えると runner は in-process ワーカープールで todo を N 本同時に claim・実行する。
+# 上げると claude -p の同時セッション数・総予算が比例して増えるため、明示宣言した分だけ並列化する。
+max_concurrency = 1
+
 [agents]
 # Sub-agents 3役。Verifier は Implementer と必ず別モデルにすること(記事の Sub-agents の肝)。
 # 書いた本人は自分に高得点をつけるため、独立した別モデルが受け入れ基準を再判定する。

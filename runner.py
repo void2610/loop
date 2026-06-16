@@ -12,13 +12,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 import threading
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -55,6 +58,22 @@ REVIEW_NOTES = DATA / "review-notes.md"
 WORKTREES_DIR = ROOT / ".loop-worktrees"
 
 JUDGMENT_HEADING = "## 判断"
+
+# --- 並列実行の直列化ロック(§4.3 / §4.5) ---
+# 同一プロセス内で N 本の run を回す前提のロック群。max_concurrency=1 のときは取得しても
+# 競合がないため現状と完全等価。別プロセスワーカー化する場合は file lock へ置き換える。
+# RLock: 完了処理ブロック(update_status→upsert_md→auto_commit)を一括で囲みつつ、
+# 内側の auto_commit が同じロックを再取得してもデッドロックしないため再入可能にする。
+_DATA_COMMIT_LOCK = threading.RLock()       # data/ への書き込み・commit を直列化(index.lock 競合回避)
+_WT_LOCKS: dict[str, threading.Lock] = {}   # repo パスごとの worktree 操作ロック
+_WT_LOCKS_GUARD = threading.Lock()
+
+
+def _wt_lock(repo: Path) -> threading.Lock:
+    """対象 repo 単位の worktree 操作ロックを返す(同一 repo の並行 add/remove 競合を直列化)。"""
+    key = str(repo.resolve())
+    with _WT_LOCKS_GUARD:
+        return _WT_LOCKS.setdefault(key, threading.Lock())
 
 
 # --- タスク = 1 ファイル(data/tasks/<id>.md、YAML front-matter) ---
@@ -257,15 +276,17 @@ def add_worktree(repo: Path, run_id: str) -> tuple[Path, str]:
     wt = WORKTREES_DIR / run_id
     branch = f"loop/{run_id}"
     WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt), "HEAD"],
-        check=True, capture_output=True, text=True,
-    )
+    with _wt_lock(repo):  # 同一 repo への並行 worktree add を直列化(共有 .git のメタ競合回避)
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt), "HEAD"],
+            check=True, capture_output=True, text=True,
+        )
     return wt, branch
 
 
 def remove_worktree(repo: Path, wt: Path) -> None:
-    git(repo, "worktree", "remove", "--force", str(wt))
+    with _wt_lock(repo):  # add と同じ repo ロックで直列化
+        git(repo, "worktree", "remove", "--force", str(wt))
 
 
 def commit_worktree(wt: Path, message: str) -> bool:
@@ -277,32 +298,71 @@ def commit_worktree(wt: Path, message: str) -> bool:
     return True
 
 
-def write_run_status(**fields) -> None:
-    """実行中の状態を data/.run.lock(=ロック兼ステータス)に JSON で書く。Web 監視が読む。"""
+def _status_path(run_id: str) -> Path:
+    """各 run の進行ステータスファイル(SSE が配列で集約して読む契約。§4.7)。"""
+    return RUNS / run_id / "status.json"
+
+
+def _merge_json(path: Path, fields: dict) -> dict:
+    cur: dict = {}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8") or "{}")
+            if isinstance(loaded, dict):
+                cur = loaded
+        except (json.JSONDecodeError, OSError):
+            cur = {}
+    cur.update(fields)
+    return cur
+
+
+def write_run_status(run_id: str, **fields) -> None:
+    """各 run の進行状態を runs/<run_id>/status.json(run_id キー)に書く(SSE が配列で読む)。
+    N 本同時でも 1 ファイルに混ざらないよう run ごとに分離している(§4.1 / §4.7)。
+    互換のため単一 run マーカー data/.run.lock にも現行形のステータスをミラーする。"""
+    sp = _status_path(run_id)
+    try:
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        merged = _merge_json(sp, {"run_id": run_id, **fields})
+        sp.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        merged = {"run_id": run_id, **fields}
+    # .run.lock ミラー: 現行 Web 監視(単一 run 前提)の後方互換。max_concurrency=1 では実質同一。
     lock = DATA / ".run.lock"
     try:
-        cur = {}
-        if lock.exists():
-            try:
-                cur = json.loads(lock.read_text(encoding="utf-8") or "{}")
-            except json.JSONDecodeError:
-                cur = {}
-        cur.update(fields)
-        lock.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+        lock.write_text(json.dumps(_merge_json(lock, merged), ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def clear_run_status(run_id: str, verdict: str | None = None) -> None:
+    """run 完了時の後処理。status.json を done 化する(SSE が完了を検知できる)。
+    .run.lock(claim 兼ミラー)の掃除はここでは行わない — claim の解放は claim を取った
+    cmd_run / ワーカープール側の責務(retry を跨いで claim を保持するため)。"""
+    sp = _status_path(run_id)
+    try:
+        if sp.parent.exists():
+            sp.write_text(json.dumps(
+                {"run_id": run_id, "phase": "done", "verdict": verdict}, ensure_ascii=False),
+                encoding="utf-8")
     except OSError:
         pass
 
 
 def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
-    """種類A: チェックポイントコミット。loop.db(ビュー)は .gitignore 済みなので入らない。"""
+    """種類A: チェックポイントコミット。loop.db(ビュー)は .gitignore 済みなので入らない。
+    data/ への commit は N 本の run が同時に呼ぶと .git/index.lock 競合で取りこぼすため、
+    プロセス内ロックで直列化する(§4.3)。worktree(対象 repo)側は run_id で index が独立なので対象外。"""
     rels = [str(p.relative_to(repo)) for p in paths if p and p.exists()]
     if not rels:
         return
-    git(repo, "add", *rels)
-    staged = git(repo, "diff", "--cached", "--quiet")
-    if staged.returncode == 0:
-        return  # 差分なし
-    git(repo, "commit", "-q", "-m", message)
+    is_data = repo.resolve() == DATA
+    lock = _DATA_COMMIT_LOCK if is_data else contextlib.nullcontext()
+    with lock:
+        git(repo, "add", *rels)
+        if git(repo, "diff", "--cached", "--quiet").returncode == 0:
+            return  # 差分なし
+        git(repo, "commit", "-q", "-m", message)
 
 
 # --- headless 実行(役割ごと) ---
@@ -788,11 +848,15 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
     no_repo = repo is None
     if not no_repo and not is_git_repo(repo):
         (run_dir / "test-output.txt").write_text(f"NG: repo が git リポジトリではありません: {repo}\n", encoding="utf-8")
+        write_run_status(run_id=run_id, task=task["id"], repo=str(repo),
+                         started_at=started_at, phase="verifier", verdict=None)
         md = write_run_md(task, run_id, "fail", None, cfg, started_at, None,
                           "none", "handoff", None, {}, repo=None)
-        update_status(task["id"], "fail")
-        conn = loopdb.connect(DB); loopdb.upsert_md(conn, md); conn.close()
-        auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → fail(repo 不正)")
+        with _DATA_COMMIT_LOCK:  # 完了処理(task status / loop.db / commit)を一括で直列化(§4.3)
+            update_status(task["id"], "fail")
+            conn = loopdb.connect(DB); loopdb.upsert_md(conn, md); conn.close()
+            auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → fail(repo 不正)")
+        clear_run_status(run_id, "fail")
         print(f"  · repo が不正: {repo} → fail")
         return "fail", False
 
@@ -812,7 +876,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
 
         # 2) Implementer(read-write、ここが本作業)
-        write_run_status(phase="implementer")
+        write_run_status(run_id=run_id, phase="implementer")
         print("  · Implementer 実装中 …")
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
         i_result, i_hint = run_role("implementer", render_implementer_prompt(task, explorer_findings),
@@ -833,7 +897,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             retryable = True
         else:
             # 3) 決定論テスト(証拠)
-            write_run_status(phase="verifier")
+            write_run_status(run_id=run_id, phase="verifier")
             test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"
             # 4) Verifier(別モデル、read-only、構造化出力)。handoff の間は再判定(冪等で安全)。
             vmax = int(loop.get("verifier_attempts", 3))
@@ -863,13 +927,14 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
 
         md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
                           test_verdict, verifier_verdict, verifier_obj, roles, repo=repo)
-        update_status(task["id"], final)
-
-        conn = loopdb.connect(DB)
-        loopdb.upsert_md(conn, md)
-        conn.close()
-
-        auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → {final}")
+        # 完了処理(task status 書換 / loop.db upsert / data/ commit)を 1 ブロックで直列化(§4.3)。
+        # N 本が同時にここへ来ても data/ の index.lock 競合や loop.db 書込み競合を避ける。
+        with _DATA_COMMIT_LOCK:
+            update_status(task["id"], final)
+            conn = loopdb.connect(DB)
+            loopdb.upsert_md(conn, md)
+            conn.close()
+            auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → {final}")
 
         print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
         if no_repo:
@@ -879,18 +944,46 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             print(f"  · run MD: {md.relative_to(DATA)} / {branch_note}")
         return final, retryable
     finally:
+        clear_run_status(run_id, locals().get("final"))  # status.json を done 化(.run.lock ミラーも掃除)
         if no_repo:
             shutil.rmtree(wt, ignore_errors=True)
         else:
             remove_worktree(repo, wt)
 
 
-def cmd_run(task_id: str | None = None) -> int:
-    import os
-    cfg = load_config()
-    DATA.mkdir(parents=True, exist_ok=True)
-    REVIEW_NOTES.touch(exist_ok=True)
+def _run_task_to_completion(task: dict, cfg: dict) -> str:
+    """1 タスクを確定まで担当する(=1 ジョブの単位。§4.4-a)。再試行込みで最終 verdict を返す。
+    claim 機構を持たない: claim は呼び出し側(cmd_run / ワーカープール)の責務。"""
+    now = datetime.now(timezone.utc).astimezone()
+    # 同日リトライでの run_id 衝突を避けるため時刻まで含める。再試行は -retryN を付ける。
+    base = f"{now:%Y-%m-%d-%H%M%S}-{task['id']}"
+    started_at = now.isoformat(timespec="seconds")
+    # 実装が timeout/error で確定しなかったときだけ run 全体を再試行(冪等タスク前提)。
+    # 決定済みの pass/fail/handoff は再試行しない。非冪等タスクは task に max_attempts: 1 を指定。
+    max_attempts = int(task.get("max_attempts") or cfg["loop"].get("max_attempts", 2))
 
+    final = "fail"
+    for attempt in range(1, max_attempts + 1):
+        run_id = base if attempt == 1 else f"{base}-retry{attempt}"
+        print(f"▶ run: {run_id}" + ("" if attempt == 1 else f"(再試行 {attempt}/{max_attempts})"))
+        final, retryable = _run_attempt(task, run_id, cfg, started_at)
+        if not retryable:
+            break
+        if attempt == max_attempts:
+            print(f"  · 再試行上限({max_attempts})到達 → final={final} で確定。")
+            break
+        print(f"  · 実装が確定せず({final})。新しい worktree で run 全体を再試行します …")
+    return final
+
+
+def _warn_same_verifier(cfg: dict) -> None:
+    agents = cfg["agents"]
+    if agents["verifier_model"] == agents["implementer_model"]:
+        print("  ! 警告: verifier_model が implementer_model と同一。別モデルにすべき(記事の Sub-agents の肝)。")
+
+
+def _run_serial(task_id: str | None, cfg: dict) -> int:
+    """max_concurrency=1 の直列実行。.run.lock の O_EXCL atomic claim で従来挙動を完全維持する。"""
     # 単一オペレータ前提の atomic claim。/dispatch 連打などの同時実行で
     # 同一タスクを2プロセスが拾い branch 衝突するのを防ぐ。
     lock = DATA / ".run.lock"
@@ -899,7 +992,6 @@ def cmd_run(task_id: str | None = None) -> int:
     except FileExistsError:
         print("別の run が進行中です(data/.run.lock)。完了を待つか、残留なら削除してください。")
         return 1
-
     try:
         if task_id:  # 特定タスクを指定実行(Web の「実行」ボタン)
             task = next((t for t in parse_tasks() if t.get("id") == task_id), None)
@@ -911,32 +1003,73 @@ def cmd_run(task_id: str | None = None) -> int:
         if not task:
             print("実行可能な todo タスクがありません(data/tasks/)。")
             return 0
-
-        agents = cfg["agents"]
-        if agents["verifier_model"] == agents["implementer_model"]:
-            print("  ! 警告: verifier_model が implementer_model と同一。別モデルにすべき(記事の Sub-agents の肝)。")
-
-        now = datetime.now(timezone.utc).astimezone()
-        # 同日リトライでの run_id 衝突を避けるため時刻まで含める。再試行は -retryN を付ける。
-        base = f"{now:%Y-%m-%d-%H%M%S}-{task['id']}"
-        started_at = now.isoformat(timespec="seconds")
-        # 実装が timeout/error で確定しなかったときだけ run 全体を再試行(冪等タスク前提)。
-        # 決定済みの pass/fail/handoff は再試行しない。非冪等タスクは task に max_attempts: 1 を指定。
-        max_attempts = int(task.get("max_attempts") or cfg["loop"].get("max_attempts", 2))
-
-        for attempt in range(1, max_attempts + 1):
-            run_id = base if attempt == 1 else f"{base}-retry{attempt}"
-            print(f"▶ run: {run_id}" + ("" if attempt == 1 else f"(再試行 {attempt}/{max_attempts})"))
-            final, retryable = _run_attempt(task, run_id, cfg, started_at)
-            if not retryable:
-                break
-            if attempt == max_attempts:
-                print(f"  · 再試行上限({max_attempts})到達 → final={final} で確定。")
-                break
-            print(f"  · 実装が確定せず({final})。新しい worktree で run 全体を再試行します …")
+        _warn_same_verifier(cfg)
+        _run_task_to_completion(task, cfg)
     finally:
         lock.unlink(missing_ok=True)
     return 0
+
+
+def _claim_next(cfg: dict, handled: set[str], guard: threading.Lock) -> dict | None:
+    """todo の先頭から、この invocation でまだ拾っていない最初のタスクを atomic に claim する。
+    .run.lock(O_EXCL)が単一プロセスで担っていた「同一タスクの二重 claim 防止」を N 並行間で再現する
+    (§4.2 の claim を in-process に縮約)。`handled` は揮発キャッシュで authoritative ではない
+    (真実は tasks/*.md の status)。一度 claim したタスクはこの実行内では二度と拾わない
+    = 1 job = 1 task を確定まで担当(§4.4-a)。"""
+    with guard:
+        for t in parse_tasks():
+            if t["id"] in handled:
+                continue
+            if str(t.get("status", "todo")).lower() != "todo":
+                continue
+            handled.add(t["id"])
+            return t
+        return None
+
+
+def _run_parallel(task_id: str | None, cfg: dict, max_concurrency: int) -> int:
+    """max_concurrency>1 の並列実行。in-process claim + ThreadPool で N 本同時に回す。
+    claude -p は subprocess 委譲なので GIL を待たず並行する(§4.6)。"""
+    _warn_same_verifier(cfg)
+    if task_id:  # 単一タスク指定はそのまま 1 本実行(claim 競合の対象がない)
+        task = next((t for t in parse_tasks() if t.get("id") == task_id), None)
+        if not task:
+            print(f"タスクが見つかりません: {task_id}")
+            return 1
+        _run_task_to_completion(task, cfg)
+        (DATA / ".run.lock").unlink(missing_ok=True)
+        return 0
+
+    print(f"▶ 並列実行(max_concurrency={max_concurrency})。todo を順に claim します …")
+    handled: set[str] = set()  # この実行で claim 済みのタスク id(再 claim 防止。揮発)
+    guard = threading.Lock()
+
+    def _worker() -> None:
+        while True:
+            task = _claim_next(cfg, handled, guard)
+            if task is None:
+                return
+            try:
+                _run_task_to_completion(task, cfg)
+            except Exception as ex:  # 1 ジョブの失敗を他ワーカーへ波及させない(§4.4-e)
+                print(f"  ! run 失敗(隔離) {task['id']}: {ex!r}", file=sys.stderr)
+
+    with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
+        for f in [pool.submit(_worker) for _ in range(max_concurrency)]:
+            f.result()
+    (DATA / ".run.lock").unlink(missing_ok=True)  # 全 run 完了 → 単一 run 後方互換マーカーを掃除
+    return 0
+
+
+def cmd_run(task_id: str | None = None) -> int:
+    cfg = load_config()
+    DATA.mkdir(parents=True, exist_ok=True)
+    REVIEW_NOTES.touch(exist_ok=True)
+    # デフォルト 1 = 従来の単一直列(.run.lock)と完全等価。N へ上げるのは loop.toml の明示宣言のみ。
+    max_concurrency = max(1, int(cfg["loop"].get("max_concurrency", 1)))
+    if max_concurrency == 1:
+        return _run_serial(task_id, cfg)
+    return _run_parallel(task_id, cfg, max_concurrency)
 
 
 def cmd_reindex() -> int:
