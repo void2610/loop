@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}ライブ {{ run_id }} — loop{% endblock %}
+{% block body %}
+{% if active %}<meta http-equiv="refresh" content="2">{% endif %}
+<p><a href="/monitor">← 監視</a>{% if not active %} ・ <a href="/run/{{ run_id }}">detail</a>{% endif %}</p>
+<h2>ライブ transcript
+  {% if active %}<span class="pill timeout">● 実行中</span>{% else %}<span class="pill">完了</span>{% endif %}
+  <span class="muted">{{ run_id }}</span></h2>
+{% if active %}<p class="muted">2 秒ごとに自動更新。役割が進むとイベントが増えます。</p>{% endif %}
+
+{% for role in roles %}
+  <h3>{{ role.label }} <span class="muted">{{ role.events|length }} events</span></h3>
+  {% for e in role.events %}
+    <div class="msg m-{{ e.cls }}">
+      <div class="who"><span>{{ e.label }}</span><span class="muted">{{ e.ts }}</span></div>
+      {% if e.cls in ("tool", "result") %}<pre>{{ e.body }}</pre>{% else %}<div class="body">{{ e.body }}</div>{% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <p class="muted">まだイベントがありません(起動直後)。</p>
+{% endfor %}
+
+<script>window.scrollTo(0, document.body.scrollHeight);</script>
+{% endblock %}

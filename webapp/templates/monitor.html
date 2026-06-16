@@ -10,7 +10,8 @@
     <div style="margin:.3rem 0">
       <span class="repo-badge {{ 'norepo' if (status.repo or '')|lower == 'none' else '' }}">{{ repo_label(status.repo) }}</span>
       <b>{{ status.task or '(不明)' }}</b>
-      {% if status.run_id %}<a href="/run/{{ status.run_id }}" class="muted">{{ status.run_id }}</a>{% endif %}
+      {% if status.run_id %}<a href="/monitor/live/{{ status.run_id }}"><b>▶ ライブ transcript を見る</b></a>
+      <a href="/run/{{ status.run_id }}" class="muted">{{ status.run_id }}</a>{% endif %}
     </div>
     <div class="phases">
       {% set order = ['explorer','implementer','verifier'] %}

@@ -17,6 +17,7 @@ import json
 import shutil
 import subprocess
 import sys
+import threading
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -319,7 +320,7 @@ def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
     loop = cfg["loop"]
     cmd = [
         "claude", "-p", prompt,
-        "--output-format", "json",
+        "--output-format", "stream-json", "--verbose",  # 逐次イベントを得てライブ表示する
         "--model", model,
         "--max-turns", str(loop.get("max_turns", 40)),
         "--max-budget-usd", str(loop["max_budget_usd"]),
@@ -330,18 +331,47 @@ def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
         cmd += ["--disallowedTools", *WRITE_TOOLS]
     if extra_args:
         cmd += extra_args
+
+    stream_path = run_dir / f"{role}.stream.jsonl"
     err = run_dir / f"{role}.stderr.log"
+    proc = subprocess.Popen(cmd, cwd=str(wt), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1)
+    killed = {"v": False}
+
+    def _kill():
+        killed["v"] = True
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    timer = threading.Timer(loop["timeout_seconds"], _kill)
+    timer.start()
+    lines: list[str] = []
     try:
-        proc = subprocess.run(cmd, cwd=str(wt), capture_output=True, text=True,
-                              timeout=loop["timeout_seconds"])
-    except subprocess.TimeoutExpired as e:
-        err.write_text(e.stderr if isinstance(e.stderr, str) else "", encoding="utf-8")
+        with stream_path.open("w", encoding="utf-8") as sf:
+            for line in proc.stdout:  # イベントが来るたび即ファイルへ(Web がライブ tail する)
+                sf.write(line)
+                sf.flush()
+                lines.append(line)
+    finally:
+        timer.cancel()
+        proc.wait()
+    err.write_text(proc.stderr.read() or "", encoding="utf-8")
+    if killed["v"]:
         return None, "timeout"
-    err.write_text(proc.stderr or "", encoding="utf-8")
-    try:
-        result = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        (run_dir / f"{role}.result.raw.txt").write_text(proc.stdout or "", encoding="utf-8")
+
+    result = None
+    for line in reversed(lines):  # 末尾の result イベント(= 従来の json 出力と同形)を拾う
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(o, dict) and o.get("type") == "result":
+            result = o
+            break
+    if result is None:
+        (run_dir / f"{role}.result.raw.txt").write_text("".join(lines), encoding="utf-8")
         return None, "error"
     (run_dir / f"{role}.result.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

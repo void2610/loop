@@ -222,6 +222,24 @@ def monitor(request: Request):
         "phases": [("explorer", "Explorer"), ("implementer", "Implementer"), ("verifier", "検証/Verifier")]})
 
 
+@app.get("/monitor/live/{run_id}", response_class=HTMLResponse)
+def monitor_live(request: Request, run_id: str):
+    if "/" in run_id or ".." in run_id:
+        return HTMLResponse("bad request", status_code=400)
+    rd = RUNS / run_id
+    if not rd.is_dir():
+        return HTMLResponse(f"run not found: {run_id}", status_code=404)
+    status = _read_run_status()
+    active = bool(status and status.get("run_id") == run_id)
+    roles = []
+    for key, label in (("explorer", "Explorer"), ("implementer", "Implementer"), ("verifier", "Verifier")):
+        sp = rd / f"{key}.stream.jsonl"
+        if sp.exists() and sp.stat().st_size > 0:
+            roles.append({"label": label, "events": _parse_transcript(sp)})
+    return templates.TemplateResponse(request, "monitor_live.html", {
+        "run_id": run_id, "status": status, "active": active, "roles": roles})
+
+
 @app.get("/todo", response_class=HTMLResponse)
 def todo_list(request: Request, started: str = "", generating: int = 0):
     return templates.TemplateResponse(request, "todo_list.html", {
