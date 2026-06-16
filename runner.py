@@ -676,7 +676,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         remove_worktree(repo, wt)
 
 
-def cmd_run() -> int:
+def cmd_run(task_id: str | None = None) -> int:
     import os
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
@@ -692,7 +692,13 @@ def cmd_run() -> int:
         return 1
 
     try:
-        task = next_todo(parse_tasks())
+        if task_id:  # 特定タスクを指定実行(Web の「実行」ボタン)
+            task = next((t for t in parse_tasks() if t.get("id") == task_id), None)
+            if not task:
+                print(f"タスクが見つかりません: {task_id}")
+                return 1
+        else:
+            task = next_todo(parse_tasks())
         if not task:
             print("実行可能な todo タスクがありません(data/tasks/)。")
             return 0
@@ -768,10 +774,12 @@ def cmd_status() -> int:
 
 def main() -> int:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
-    table = {"run": cmd_run, "reindex": cmd_reindex, "review": cmd_review, "status": cmd_status}
+    if cmd == "run":
+        return cmd_run(sys.argv[2] if len(sys.argv) > 2 else None)
+    table = {"reindex": cmd_reindex, "review": cmd_review, "status": cmd_status}
     if cmd in table:
         return table[cmd]()
-    print(f"unknown command: {cmd}\nusage: runner.py [run|review|reindex|status]", file=sys.stderr)
+    print(f"unknown command: {cmd}\nusage: runner.py [run [task_id]|review|reindex|status]", file=sys.stderr)
     return 2
 
 

@@ -114,16 +114,16 @@ def _safe_id(task_id: str) -> str | None:
 
 
 def _fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
-    """front-matter dict → フォーム用フィールド(リストは改行区切り文字列に)。"""
+    """front-matter dict → フォーム用フィールド(accept/constraints は行 UI 用にリストのまま)。"""
     tools = fm.get("allowed_tools")
     if isinstance(tools, list):
         tools = ", ".join(tools)
     return {
         "task_id": task_id,
         "goal": fm.get("goal", ""),
-        "accept": "\n".join(fm.get("accept") or []),
+        "accept": fm.get("accept") or [],
         "verify": fm.get("verify", "") or "",
-        "constraints": "\n".join(fm.get("constraints") or []),
+        "constraints": fm.get("constraints") or [],
         "allowed_tools": tools or "",
         "max_attempts": fm.get("max_attempts", "") if fm.get("max_attempts") is not None else "",
         "status": fm.get("status", "todo"),
@@ -131,15 +131,16 @@ def _fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
     }
 
 
-def _fm_from_form(task_id, goal, accept, verify, constraints, allowed_tools, max_attempts, status) -> dict:
+def _fm_from_form(task_id, goal, accept: list[str], verify, constraints: list[str],
+                  allowed_tools, max_attempts, status) -> dict:
     """フォーム入力 → front-matter dict(順序を固定。空フィールドは省く)。"""
     fm: dict = {"id": task_id, "goal": goal.strip("\n")}
-    acc = [x.strip() for x in (accept or "").splitlines() if x.strip()]
+    acc = [x.strip() for x in accept if x.strip()]
     if acc:
         fm["accept"] = acc
     if (verify or "").strip():
         fm["verify"] = verify.strip("\n")
-    cons = [x.strip() for x in (constraints or "").splitlines() if x.strip()]
+    cons = [x.strip() for x in constraints if x.strip()]
     if cons:
         fm["constraints"] = cons
     if (allowed_tools or "").strip():
@@ -153,14 +154,29 @@ def _fm_from_form(task_id, goal, accept, verify, constraints, allowed_tools, max
     return fm
 
 
+def _latest_runs() -> dict:
+    """task id → 最新 run {run_id, verdict}(loop.db から。各 run は完了時に upsert 済み)。"""
+    last: dict = {}
+    try:
+        conn = loopdb.connect(runner.DB)
+        for r in conn.execute("SELECT task, run_id, verdict FROM runs ORDER BY started_at DESC, run_id DESC"):
+            last.setdefault(r["task"], {"run_id": r["run_id"], "verdict": r["verdict"]})
+        conn.close()
+    except Exception:
+        pass
+    return last
+
+
 @app.get("/todo", response_class=HTMLResponse)
-def todo_list(request: Request):
-    return templates.TemplateResponse(request, "todo_list.html", {"tasks": runner.parse_tasks()})
+def todo_list(request: Request, started: str = ""):
+    return templates.TemplateResponse(request, "todo_list.html", {
+        "tasks": runner.parse_tasks(), "last": _latest_runs(),
+        "running": (runner.DATA / ".run.lock").exists(), "started": started})
 
 
 @app.get("/todo/new", response_class=HTMLResponse)
 def todo_new(request: Request):
-    fields = {"task_id": "", "goal": "", "accept": "", "verify": "", "constraints": "",
+    fields = {"task_id": "", "goal": "", "accept": [], "verify": "", "constraints": [],
               "allowed_tools": "Read, Edit, Write, Grep, Glob, Bash", "max_attempts": "",
               "status": "todo", "body": ""}
     return templates.TemplateResponse(request, "todo_edit.html", {
@@ -179,8 +195,8 @@ def todo_edit(request: Request, task_id: str, saved: int = 0):
 
 
 @app.post("/todo/new")
-def todo_create(task_id: str = Form(""), goal: str = Form(""), accept: str = Form(""),
-                verify: str = Form(""), constraints: str = Form(""), allowed_tools: str = Form(""),
+def todo_create(task_id: str = Form(""), goal: str = Form(""), accept: list[str] = Form([]),
+                verify: str = Form(""), constraints: list[str] = Form([]), allowed_tools: str = Form(""),
                 max_attempts: str = Form(""), status: str = Form("todo"), body: str = Form("")):
     tid = _safe_id(task_id)
     if not tid:
@@ -194,8 +210,8 @@ def todo_create(task_id: str = Form(""), goal: str = Form(""), accept: str = For
 
 
 @app.post("/todo/{task_id}")
-def todo_save(task_id: str, goal: str = Form(""), accept: str = Form(""), verify: str = Form(""),
-              constraints: str = Form(""), allowed_tools: str = Form(""), max_attempts: str = Form(""),
+def todo_save(task_id: str, goal: str = Form(""), accept: list[str] = Form([]), verify: str = Form(""),
+              constraints: list[str] = Form([]), allowed_tools: str = Form(""), max_attempts: str = Form(""),
               status: str = Form("todo"), body: str = Form("")):
     tid = _safe_id(task_id)
     if not tid:
@@ -204,6 +220,17 @@ def todo_save(task_id: str, goal: str = Form(""), accept: str = Form(""), verify
     p = runner.write_task(tid, fm, body)
     runner.auto_commit(runner.DATA, [p], f"todo: {tid} を編集")
     return RedirectResponse(f"/todo/{tid}?saved=1", status_code=303)
+
+
+@app.post("/todo/{task_id}/run")
+def todo_run(task_id: str):
+    tid = _safe_id(task_id)
+    if not tid or not (runner.TASKS_DIR / f"{tid}.md").exists():
+        return HTMLResponse("no such task", status_code=404)
+    if (runner.DATA / ".run.lock").exists():
+        return RedirectResponse("/todo?started=busy", status_code=303)
+    subprocess.Popen(["uv", "run", "runner.py", "run", tid], cwd=str(ROOT))  # dispatch は種類A
+    return RedirectResponse(f"/todo?started={tid}", status_code=303)
 
 
 @app.post("/todo/{task_id}/delete")

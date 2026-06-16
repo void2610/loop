@@ -16,14 +16,26 @@
   <label for="goal">goal <span class="muted">(達成したいこと。複数行可)</span></label>
   <textarea id="goal" name="goal" rows="4" required>{{ f.goal }}</textarea>
 
-  <label for="accept">accept <span class="muted">(受け入れ基準。1 行 1 項目。数値で二値判定できるように)</span></label>
-  <textarea id="accept" name="accept" rows="3">{{ f.accept }}</textarea>
+  <label>accept <span class="muted">(受け入れ基準。項目ごと。数値で二値判定できるように)</span></label>
+  <div class="rows" id="accept-rows">
+    {% for a in f.accept %}
+    <div class="rowitem"><input name="accept" value="{{ a }}"><button type="button" class="del" title="削除">−</button></div>
+    {% endfor %}
+    <div class="rowitem"><input name="accept" value="" placeholder="受け入れ基準を1つ"><button type="button" class="del" title="削除">−</button></div>
+  </div>
+  <button type="button" class="addrow" data-target="accept-rows">＋ 項目を追加</button>
 
   <label for="verify">verify <span class="muted">(決定論の検証コマンド。exit 0 = test pass。空なら Verifier 判定に委ねる)</span></label>
   <textarea id="verify" name="verify" rows="3" spellcheck="false">{{ f.verify }}</textarea>
 
-  <label for="constraints">constraints <span class="muted">(禁止領域・制約。1 行 1 項目。任意)</span></label>
-  <textarea id="constraints" name="constraints" rows="3">{{ f.constraints }}</textarea>
+  <label>constraints <span class="muted">(禁止領域・制約。項目ごと。任意)</span></label>
+  <div class="rows" id="constraints-rows">
+    {% for c in f.constraints %}
+    <div class="rowitem"><input name="constraints" value="{{ c }}"><button type="button" class="del" title="削除">−</button></div>
+    {% endfor %}
+    <div class="rowitem"><input name="constraints" value="" placeholder="制約を1つ"><button type="button" class="del" title="削除">−</button></div>
+  </div>
+  <button type="button" class="addrow" data-target="constraints-rows">＋ 項目を追加</button>
 
   <div class="row">
     <div>
@@ -49,4 +61,28 @@
     <button type="submit">{% if is_new %}作成{% else %}保存{% endif %}</button>
   </div>
 </form>
+
+{% if not is_new %}
+<form method="post" action="/todo/{{ f.task_id }}/run" style="max-width:60rem; margin-top:.6rem;"
+      onsubmit="return confirm('{{ f.task_id }} を今すぐ実行しますか?(3役 run が background で走ります)')">
+  <button type="submit">▶ このタスクを実行</button>
+  <span class="muted">未保存の編集は反映されません。先に保存してください。</span>
+</form>
+{% endif %}
+
+<script>
+document.addEventListener('click', function (e) {
+  if (e.target.classList.contains('addrow')) {
+    var box = document.getElementById(e.target.dataset.target);
+    var row = box.querySelector('.rowitem').cloneNode(true);
+    row.querySelector('input').value = '';
+    box.appendChild(row);
+    row.querySelector('input').focus();
+  } else if (e.target.classList.contains('del')) {
+    var box = e.target.closest('.rows');
+    if (box.querySelectorAll('.rowitem').length > 1) e.target.closest('.rowitem').remove();
+    else e.target.previousElementSibling.value = '';
+  }
+});
+</script>
 {% endblock %}
