@@ -1,22 +1,52 @@
 {% extends "base.html" %}
-{% block title %}{{ "新規タスク" if is_new else task_id }} — TODO — loop{% endblock %}
+{% block title %}{{ "新規タスク" if is_new else f.task_id }} — TODO — loop{% endblock %}
 {% block body %}
 <p><a href="/todo">← タスク一覧</a></p>
 {% if saved %}<p class="pass">保存しました(data repo へコミット済み)。</p>{% endif %}
 
-<div class="review-pane">
-  <h2>{% if is_new %}新規タスク{% else %}{{ task_id }} を編集{% endif %}
-      <span class="muted">(契約ファイル / 保存で data repo へコミット)</span></h2>
-  <form class="judgment-form" method="post" action="{% if is_new %}/todo/new{% else %}/todo/{{ task_id }}{% endif %}">
-    {% if is_new %}
-    <p><label for="task_id">id(ファイル名 = data/tasks/&lt;id&gt;.md。英数字と . _ -)</label>
-       <input id="task_id" name="task_id" placeholder="例: fix-flaky-test" required pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></p>
-    {% endif %}
-    <textarea name="content" spellcheck="false">{{ content }}</textarea>
-    <div class="actions">
-      <p class="muted">YAML front-matter(--- で囲む)で目標契約を書く。数値で二値判定できる verify を必須に。id 行は省略可(ファイル名が id)。</p>
-      <button type="submit">{% if is_new %}作成{% else %}保存{% endif %}(data/tasks/ へ書き込み)</button>
+<h2 style="max-width:60rem">{% if is_new %}新規タスク{% else %}{{ f.task_id }} を編集{% endif %}
+    <span class="muted">(目標契約 / 保存で data/tasks/&lt;id&gt;.md へ書き込み)</span></h2>
+
+<form class="task-form" method="post" action="{% if is_new %}/todo/new{% else %}/todo/{{ f.task_id }}{% endif %}">
+  {% if is_new %}
+  <label for="task_id">id <span class="muted">(ファイル名。英数字と . _ -。先頭は英数字)</span></label>
+  <input id="task_id" name="task_id" required pattern="[A-Za-z0-9][A-Za-z0-9._-]*" placeholder="例: fix-flaky-test" value="{{ f.task_id }}">
+  {% endif %}
+
+  <label for="goal">goal <span class="muted">(達成したいこと。複数行可)</span></label>
+  <textarea id="goal" name="goal" rows="4" required>{{ f.goal }}</textarea>
+
+  <label for="accept">accept <span class="muted">(受け入れ基準。1 行 1 項目。数値で二値判定できるように)</span></label>
+  <textarea id="accept" name="accept" rows="3">{{ f.accept }}</textarea>
+
+  <label for="verify">verify <span class="muted">(決定論の検証コマンド。exit 0 = test pass。空なら Verifier 判定に委ねる)</span></label>
+  <textarea id="verify" name="verify" rows="3" spellcheck="false">{{ f.verify }}</textarea>
+
+  <label for="constraints">constraints <span class="muted">(禁止領域・制約。1 行 1 項目。任意)</span></label>
+  <textarea id="constraints" name="constraints" rows="3">{{ f.constraints }}</textarea>
+
+  <div class="row">
+    <div>
+      <label for="allowed_tools">allowed_tools <span class="muted">(カンマ区切り)</span></label>
+      <input id="allowed_tools" name="allowed_tools" value="{{ f.allowed_tools }}" placeholder="Read, Edit, Write, Bash">
     </div>
-  </form>
-</div>
+    <div>
+      <label for="max_attempts">max_attempts <span class="muted">(任意。非冪等は 1)</span></label>
+      <input id="max_attempts" name="max_attempts" type="number" min="1" value="{{ f.max_attempts }}" placeholder="既定">
+    </div>
+    <div>
+      <label for="status">status</label>
+      <select id="status" name="status">
+        {% for s in statuses %}<option value="{{ s }}" {% if s == f.status %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <label for="body">メモ <span class="muted">(自由記述。front-matter の後に置かれる。任意)</span></label>
+  <textarea id="body" name="body" rows="3">{{ f.body }}</textarea>
+
+  <div class="actions">
+    <button type="submit">{% if is_new %}作成{% else %}保存{% endif %}</button>
+  </div>
+</form>
 {% endblock %}

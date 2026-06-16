@@ -103,28 +103,54 @@ def judge(run_id: str, trust: str = Form(""), risk: str = Form(""),
 import re  # noqa: E402
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-NEW_TASK_TEMPLATE = """---
-goal: |
-  <ここに目標を書く>
-accept:
-  - <数値で二値判定できる受け入れ基準>
-verify: <決定論の検証コマンド。exit 0 = pass。無ければ Verifier 判定に委ねる>
-constraints:
-  - <制約があれば。無ければこの行ごと消す>
-allowed_tools: Read,Edit,Write,Grep,Glob,Bash
-status: todo
----
-
-<自由メモ>
-"""
+_STATUSES = ["todo", "pass", "fail", "timeout", "handoff"]
 
 
-def _task_path(task_id: str):
-    """id を安全な data/tasks/<id>.md パスに変換。不正なら None。"""
+def _safe_id(task_id: str) -> str | None:
+    task_id = (task_id or "").strip()
     if not task_id or not _SAFE_ID.match(task_id) or task_id.startswith(("_", ".")) or "/" in task_id:
         return None
-    return runner.TASKS_DIR / f"{task_id}.md"
+    return task_id
+
+
+def _fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
+    """front-matter dict → フォーム用フィールド(リストは改行区切り文字列に)。"""
+    tools = fm.get("allowed_tools")
+    if isinstance(tools, list):
+        tools = ", ".join(tools)
+    return {
+        "task_id": task_id,
+        "goal": fm.get("goal", ""),
+        "accept": "\n".join(fm.get("accept") or []),
+        "verify": fm.get("verify", "") or "",
+        "constraints": "\n".join(fm.get("constraints") or []),
+        "allowed_tools": tools or "",
+        "max_attempts": fm.get("max_attempts", "") if fm.get("max_attempts") is not None else "",
+        "status": fm.get("status", "todo"),
+        "body": body,
+    }
+
+
+def _fm_from_form(task_id, goal, accept, verify, constraints, allowed_tools, max_attempts, status) -> dict:
+    """フォーム入力 → front-matter dict(順序を固定。空フィールドは省く)。"""
+    fm: dict = {"id": task_id, "goal": goal.strip("\n")}
+    acc = [x.strip() for x in (accept or "").splitlines() if x.strip()]
+    if acc:
+        fm["accept"] = acc
+    if (verify or "").strip():
+        fm["verify"] = verify.strip("\n")
+    cons = [x.strip() for x in (constraints or "").splitlines() if x.strip()]
+    if cons:
+        fm["constraints"] = cons
+    if (allowed_tools or "").strip():
+        fm["allowed_tools"] = allowed_tools.strip()
+    if str(max_attempts or "").strip():
+        try:
+            fm["max_attempts"] = int(max_attempts)
+        except ValueError:
+            pass
+    fm["status"] = status if status in _STATUSES else "todo"
+    return fm
 
 
 @app.get("/todo", response_class=HTMLResponse)
@@ -134,50 +160,60 @@ def todo_list(request: Request):
 
 @app.get("/todo/new", response_class=HTMLResponse)
 def todo_new(request: Request):
+    fields = {"task_id": "", "goal": "", "accept": "", "verify": "", "constraints": "",
+              "allowed_tools": "Read, Edit, Write, Grep, Glob, Bash", "max_attempts": "",
+              "status": "todo", "body": ""}
     return templates.TemplateResponse(request, "todo_edit.html", {
-        "task_id": "", "content": NEW_TASK_TEMPLATE, "is_new": True, "saved": False})
+        "f": fields, "is_new": True, "saved": False, "statuses": _STATUSES})
 
 
 @app.get("/todo/{task_id}", response_class=HTMLResponse)
 def todo_edit(request: Request, task_id: str, saved: int = 0):
-    p = _task_path(task_id)
-    if not p or not p.exists():
+    tid = _safe_id(task_id)
+    res = runner.read_task(tid) if tid else None
+    if res is None:
         return HTMLResponse(f"task not found: {task_id}", status_code=404)
+    fm, body = res
     return templates.TemplateResponse(request, "todo_edit.html", {
-        "task_id": task_id, "content": p.read_text(encoding="utf-8"), "is_new": False, "saved": bool(saved)})
+        "f": _fields_from_fm(tid, fm, body), "is_new": False, "saved": bool(saved), "statuses": _STATUSES})
 
 
 @app.post("/todo/new")
-def todo_create(task_id: str = Form(""), content: str = Form("")):
-    p = _task_path(task_id.strip())
-    if not p:
+def todo_create(task_id: str = Form(""), goal: str = Form(""), accept: str = Form(""),
+                verify: str = Form(""), constraints: str = Form(""), allowed_tools: str = Form(""),
+                max_attempts: str = Form(""), status: str = Form("todo"), body: str = Form("")):
+    tid = _safe_id(task_id)
+    if not tid:
         return HTMLResponse("不正な id です(英数字と . _ - のみ、先頭は英数字)。", status_code=400)
-    if p.exists():
-        return HTMLResponse(f"既に存在します: {task_id}", status_code=409)
-    runner.TASKS_DIR.mkdir(parents=True, exist_ok=True)
-    p.write_text((content or NEW_TASK_TEMPLATE).replace("\r\n", "\n"), encoding="utf-8")
-    runner.auto_commit(runner.DATA, [p], f"todo: {task_id} を新規作成")
-    return RedirectResponse(f"/todo/{task_id}?saved=1", status_code=303)
+    if (runner.TASKS_DIR / f"{tid}.md").exists():
+        return HTMLResponse(f"既に存在します: {tid}", status_code=409)
+    fm = _fm_from_form(tid, goal, accept, verify, constraints, allowed_tools, max_attempts, status)
+    p = runner.write_task(tid, fm, body)
+    runner.auto_commit(runner.DATA, [p], f"todo: {tid} を新規作成")
+    return RedirectResponse(f"/todo/{tid}?saved=1", status_code=303)
 
 
 @app.post("/todo/{task_id}")
-def todo_save(task_id: str, content: str = Form("")):
-    p = _task_path(task_id)
-    if not p:
+def todo_save(task_id: str, goal: str = Form(""), accept: str = Form(""), verify: str = Form(""),
+              constraints: str = Form(""), allowed_tools: str = Form(""), max_attempts: str = Form(""),
+              status: str = Form("todo"), body: str = Form("")):
+    tid = _safe_id(task_id)
+    if not tid:
         return HTMLResponse("invalid id", status_code=400)
-    runner.TASKS_DIR.mkdir(parents=True, exist_ok=True)
-    p.write_text(content.replace("\r\n", "\n"), encoding="utf-8")
-    runner.auto_commit(runner.DATA, [p], f"todo: {task_id} を編集")
-    return RedirectResponse(f"/todo/{task_id}?saved=1", status_code=303)
+    fm = _fm_from_form(tid, goal, accept, verify, constraints, allowed_tools, max_attempts, status)
+    p = runner.write_task(tid, fm, body)
+    runner.auto_commit(runner.DATA, [p], f"todo: {tid} を編集")
+    return RedirectResponse(f"/todo/{tid}?saved=1", status_code=303)
 
 
 @app.post("/todo/{task_id}/delete")
 def todo_delete(task_id: str):
-    p = _task_path(task_id)
+    tid = _safe_id(task_id)
+    p = runner.TASKS_DIR / f"{tid}.md" if tid else None
     if p and p.exists():
         p.unlink()
         runner.git(runner.DATA, "add", "-A", "--", "tasks")
-        runner.git(runner.DATA, "commit", "-q", "-m", f"todo: {task_id} を削除")
+        runner.git(runner.DATA, "commit", "-q", "-m", f"todo: {tid} を削除")
     return RedirectResponse("/todo", status_code=303)
 
 

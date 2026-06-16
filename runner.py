@@ -113,6 +113,43 @@ def update_status(task_id: str, new_status: str) -> None:
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _task_dumper():
+    """multi-line 文字列を YAML リテラルブロック(|)で出力する SafeDumper。フォーム保存を読みやすく保つ。"""
+    class _D(yaml.SafeDumper):
+        pass
+
+    def _str(dumper, data):
+        style = "|" if "\n" in data else None
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+    _D.add_representer(str, _str)
+    return _D
+
+
+def read_task(task_id: str) -> tuple[dict, str] | None:
+    """タスクファイルを (front-matter dict, body) に分解する(フォーム prefill 用)。"""
+    p = TASKS_DIR / f"{task_id}.md"
+    if not p.exists():
+        return None
+    lines, s, e = _split_front_matter(p.read_text(encoding="utf-8"))
+    fm = (yaml.safe_load("\n".join(lines[s:e])) or {}) if e else {}
+    body = "\n".join(lines[e + 1:]).strip() if e else ""
+    return (fm if isinstance(fm, dict) else {}), body
+
+
+def write_task(task_id: str, fm: dict, body: str = "") -> Path:
+    """front-matter dict と body からタスクファイルを書き出す(フォーム保存)。"""
+    TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    p = TASKS_DIR / f"{task_id}.md"
+    dumped = yaml.dump(fm, Dumper=_task_dumper(), allow_unicode=True,
+                       sort_keys=False, default_flow_style=False).rstrip("\n")
+    text = f"---\n{dumped}\n---\n"
+    if body.strip():
+        text += f"\n{body.strip()}\n"
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
 def goal_contract_sha(task: dict) -> str:
     """目標契約の正規化ハッシュ。skill_sha と並ぶ再現性のキー。"""
     canonical = {k: task.get(k) for k in ("goal", "accept", "constraints", "verify", "allowed_tools")}
