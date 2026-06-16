@@ -2,7 +2,7 @@
 {% block title %}ライブ {{ run_id }} — loop{% endblock %}
 {% block body %}
 {% if active %}<meta http-equiv="refresh" content="2">{% endif %}
-<p><a href="/monitor">← 監視</a>{% if not active %} ・ <a href="/run/{{ run_id }}">detail</a>{% endif %}</p>
+<p><a href="{{ base }}/monitor">← 監視</a>{% if not active %} ・ <a href="{{ base }}/run/{{ run_id }}">detail</a>{% endif %}</p>
 <h2>ライブ transcript
   {% if active %}<span class="pill timeout">● 実行中</span>{% else %}<span class="pill">完了</span>{% endif %}
   <span class="muted">{{ run_id }}</span></h2>

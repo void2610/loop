@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}TODO — loop{% endblock %}
 {% block body %}
-{% if generating %}<meta http-equiv="refresh" content="6; url=/todo">{% endif %}
-<h2>タスク <span class="muted">(data/tasks/ — {{ tasks|length }} 件)</span> <a href="/todo/new">＋ 新規</a></h2>
+{% if generating %}<meta http-equiv="refresh" content="6; url={{ base }}/todo">{% endif %}
+<h2>タスク <span class="muted">(data/tasks/ — {{ tasks|length }} 件)</span> <a href="{{ base }}/todo/new">＋ 新規</a></h2>
 {% if generating %}<p class="handoff">⏳ タスクを生成中…(Claude Code が設計中。数十秒。自動でリロードします)</p>{% endif %}
 {% if running %}<p class="timeout">● run 実行中(data/.run.lock)。完了まで新規実行は待機されます。</p>{% endif %}
 {% if started and started != 'busy' %}<p class="pass">▶ {{ started }} を実行開始しました(バックグラウンド)。完了後に最新 run 欄へ反映されます。</p>{% endif %}
@@ -14,19 +14,19 @@
   {% for t in tasks %}
     <tr>
       <td><span class="repo-badge {{ 'norepo' if (t.repo or '')|lower == 'none' else '' }}">{{ repo_label(t.repo) }}</span></td>
-      <td><a href="/todo/{{ t.id }}">{{ t.id }}</a></td>
+      <td><a href="{{ base }}/todo/{{ t.id }}">{{ t.id }}</a></td>
       <td class="{{ t.status or 'todo' }}">{{ t.status or 'todo' }}</td>
       <td class="muted">{{ (t.goal or '').split('\n')[0] }}</td>
       <td>
         {% set lr = last.get(t.id) %}
-        {% if lr %}<a href="/run/{{ lr.run_id }}" class="{{ lr.verdict }}">{{ lr.verdict }}</a>
+        {% if lr %}<a href="{{ base }}/run/{{ lr.run_id }}" class="{{ lr.verdict }}">{{ lr.verdict }}</a>
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
       <td class="actions-cell">
-        <form method="post" action="/todo/{{ t.id }}/run">
+        <form method="post" action="{{ base }}/todo/{{ t.id }}/run">
           <button type="submit" {% if running %}disabled{% endif %}>実行</button>
         </form>
-        <form method="post" action="/todo/{{ t.id }}/delete" onsubmit="return confirm('{{ t.id }} を削除しますか?(git 履歴には残ります)')">
+        <form method="post" action="{{ base }}/todo/{{ t.id }}/delete" onsubmit="return confirm('{{ t.id }} を削除しますか?(git 履歴には残ります)')">
           <button type="submit">削除</button>
         </form>
       </td>

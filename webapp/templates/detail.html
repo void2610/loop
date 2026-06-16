@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{run_id}} — loop{% endblock %}
 {% block body %}
-<p><a href="/">← 一覧</a></p>
+<p><a href="{{ base }}/">← 一覧</a></p>
 <h2><span class="repo-badge {{ 'norepo' if (fm.repo or '')|lower == 'none' else '' }}">{{ repo_label(fm.repo) }}</span>
     {{run_id}} <span class="pill {{fm.verdict}}">{{fm.verdict}}</span>
     {% if fm.reviewed in ("true","1") %}<span class="pill">reviewed ✓</span>{% else %}<span class="pill muted">未レビュー</span>{% endif %}</h2>
@@ -41,12 +41,12 @@
       <pre class="diff">{% for line in evidence["change.patch"].splitlines() %}<span class="{% if line.startswith('+') and not line.startswith('+++') %}add{% elif line.startswith('-') and not line.startswith('---') %}del{% elif line.startswith('@@') or line.startswith('diff') %}hd{% endif %}">{{ line }}</span>
 {% endfor %}</pre>
     {% endif %}
-    {% if evidence.transcript %}<p><a href="/run/{{run_id}}/transcript">transcript を読む</a> <a href="/run/{{run_id}}/file/transcript.jsonl" target="_blank" class="muted">(生 JSONL)</a></p>{% endif %}
+    {% if evidence.transcript %}<p><a href="{{ base }}/run/{{run_id}}/transcript">transcript を読む</a> <a href="{{ base }}/run/{{run_id}}/file/transcript.jsonl" target="_blank" class="muted">(生 JSONL)</a></p>{% endif %}
   </div>
 
   <div class="review-pane">
     <h3>判断 <span class="muted">(種類B / あなたが書く。GUI は生成・提案しない)</span></h3>
-    <form class="judgment-form" method="post" action="/run/{{run_id}}/judge">
+    <form class="judgment-form" method="post" action="{{ base }}/run/{{run_id}}/judge">
       <fieldset>
       {% for key,label in fields %}
         <label for="{{key}}">{{label}}</label>

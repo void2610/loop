@@ -10,8 +10,8 @@
     <div style="margin:.3rem 0">
       <span class="repo-badge {{ 'norepo' if (status.repo or '')|lower == 'none' else '' }}">{{ repo_label(status.repo) }}</span>
       <b>{{ status.task or '(不明)' }}</b>
-      {% if status.run_id %}<a href="/monitor/live/{{ status.run_id }}"><b>▶ ライブ transcript を見る</b></a>
-      <a href="/run/{{ status.run_id }}" class="muted">{{ status.run_id }}</a>{% endif %}
+      {% if status.run_id %}<a href="{{ base }}/monitor/live/{{ status.run_id }}"><b>▶ ライブ transcript を見る</b></a>
+      <a href="{{ base }}/run/{{ status.run_id }}" class="muted">{{ status.run_id }}</a>{% endif %}
     </div>
     <div class="phases">
       {% set order = ['explorer','implementer','verifier'] %}
@@ -40,7 +40,7 @@
   {% for r in recent %}
     <tr>
       <td><span class="repo-badge {{ 'norepo' if (r.repo or '')|lower == 'none' else '' }}">{{ repo_label(r.repo) }}</span></td>
-      <td><a href="/run/{{ r.run_id }}">{{ r.run_id }}</a></td>
+      <td><a href="{{ base }}/run/{{ r.run_id }}">{{ r.run_id }}</a></td>
       <td class="{{ r.verdict }}">{{ r.verdict }}</td>
       <td>{{ "✓" if r.reviewed else "·" }}</td>
       <td class="muted">{{ (r.started_at or "")[:19] }}</td>

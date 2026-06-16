@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body %}
-<form class="filter" method="get" action="/">
+<form class="filter" method="get" action="{{ base }}/">
   <select name="verdict">
     <option value="">verdict: all</option>
     {% for v in verdicts %}<option value="{{v}}" {% if v==f.verdict %}selected{% endif %}>{{v}}</option>{% endfor %}
@@ -12,7 +12,7 @@
   </select>
   <input name="task" value="{{f.task}}" placeholder="task で絞り込み">
   <button type="submit">filter</button>
-  <button type="submit" formaction="/dispatch" formmethod="post">次の todo を実行</button>
+  <button type="submit" formaction="{{ base }}/dispatch" formmethod="post">次の todo を実行</button>
   <span class="muted">{{rows|length}} runs</span>
 </form>
 
@@ -22,7 +22,7 @@
   {% for r in rows %}
     <tr>
       <td><span class="repo-badge {{ 'norepo' if (r.repo or '')|lower == 'none' else '' }}">{{ repo_label(r.repo) }}</span></td>
-      <td><a href="/run/{{r.run_id}}">{{r.run_id}}</a></td>
+      <td><a href="{{ base }}/run/{{r.run_id}}">{{r.run_id}}</a></td>
       <td class="{{r.verdict}}">{{r.verdict}}</td>
       <td>{{ "✓" if r.reviewed else "·" }}</td>
       <td>{{ "$%.3f"|format(r.cost_usd) if r.cost_usd is not none else "" }}</td>

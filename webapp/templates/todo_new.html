@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}新規タスク(プロンプト) — loop{% endblock %}
 {% block body %}
-<p><a href="/todo">← タスク一覧</a></p>
+<p><a href="{{ base }}/todo">← タスク一覧</a></p>
 {% if error %}<p class="fail">{{ error }}</p>{% endif %}
 
 <div style="max-width:60rem">
@@ -10,7 +10,7 @@
      検証可能な目標契約(goal / accept / verify / constraints / allowed_tools)へ変換します。
      生成後に内容を確認・修正できます。</p>
 
-  <form id="genform" method="post" action="/todo/generate" class="task-form">
+  <form id="genform" method="post" action="{{ base }}/todo/generate" class="task-form">
     <label for="repo">対象リポジトリ <span class="muted">(必須。推定はしません)</span></label>
     <select id="repo" name="repo" required>
       <option value="" disabled selected>— リポジトリを選択 —</option>
@@ -27,7 +27,7 @@
 
     <div class="actions">
       <button type="submit" id="genbtn">▶ Claude Code に作らせる</button>
-      <a href="/todo/new/manual" class="muted">手動で書く</a>
+      <a href="{{ base }}/todo/new/manual" class="muted">手動で書く</a>
     </div>
   </form>
   <p class="muted" id="genhint" style="display:none">生成中…(Claude Code がタスクを設計しています。数十秒)</p>

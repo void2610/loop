@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}transcript {{run_id}} — loop{% endblock %}
 {% block body %}
-<p><a href="/run/{{run_id}}">← detail</a> ・ <a href="/run/{{run_id}}/file/transcript.jsonl" target="_blank" class="muted">生 JSONL</a></p>
+<p><a href="{{ base }}/run/{{run_id}}">← detail</a> ・ <a href="{{ base }}/run/{{run_id}}/file/transcript.jsonl" target="_blank" class="muted">生 JSONL</a></p>
 <h2>transcript <span class="muted">{{run_id}} ・ {{events|length}} events</span></h2>
 
 {% for e in events %}
