@@ -269,10 +269,16 @@ def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
 
 # --- headless 実行(役割ごと) ---
 
+# read-only 役割で確実にブロックする変更系ツール。--disallowedTools は allow より優先されるため、
+# ユーザー global settings が Bash(*)/Write を許可していても read-only を強制できる。
+WRITE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"]
+
+
 def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
              tools: list[str], run_dir: Path,
-             extra_args: list[str] | None = None) -> tuple[dict | None, str]:
-    """役割を1つ headless 実行し {role}.result.json / {role}.stderr.log を保存する。"""
+             extra_args: list[str] | None = None, read_only: bool = False) -> tuple[dict | None, str]:
+    """役割を1つ headless 実行し {role}.result.json / {role}.stderr.log を保存する。
+    read_only=True は変更系ツールを --disallowedTools で禁止(global settings を上書き)。"""
     loop = cfg["loop"]
     cmd = [
         "claude", "-p", prompt,
@@ -283,6 +289,8 @@ def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
         "--permission-mode", loop.get("permission_mode", "default"),
         "--allowedTools", *tools,
     ]
+    if read_only:
+        cmd += ["--disallowedTools", *WRITE_TOOLS]
     if extra_args:
         cmd += extra_args
     err = run_dir / f"{role}.stderr.log"
@@ -372,14 +380,18 @@ def generate_task(prompt: str, cfg: dict) -> dict | None:
     ファイルへの書き込みは行わない(backend が write_task で決定論的に書く)。"""
     agents, loop = cfg["agents"], cfg["loop"]
     model = agents.get("author_model") or agents["implementer_model"]
+    # 「実行せず変換せよ」を明示。これが無いと依頼内容(例: ファイル作成)を実際にやろうとして
+    # read-only 拒否 → リトライで turn を空回りし遅くなる。
+    wrapped = ("次の依頼を loop の『目標契約(タスク定義)』に変換し、構造化出力で返してください。"
+               "**ファイルの作成・編集・コマンド実行は一切しないでください。設計だけ**です。\n\n# 依頼\n" + prompt)
     cmd = [
-        "claude", "-p", prompt,
+        "claude", "-p", wrapped,
         "--output-format", "json",
         "--model", model,
-        "--max-turns", str(loop.get("max_turns", 40)),
+        "--max-turns", "8",  # 設計のみ。空回り防止に小さく
         "--max-budget-usd", str(loop["max_budget_usd"]),
         "--permission-mode", loop.get("permission_mode", "default"),
-        "--allowedTools", "Read", "Grep", "Glob",
+        "--disallowedTools", *WRITE_TOOLS,  # 生成は read-only。global settings の Write/Bash を上書き
         "--json-schema", json.dumps(TASK_GEN_SCHEMA, ensure_ascii=False),
     ]
     if TASK_AUTHOR_SKILL.exists():
@@ -392,6 +404,50 @@ def generate_task(prompt: str, cfg: dict) -> dict | None:
         return None
     obj = result.get("structured_output")
     return obj if isinstance(obj, dict) else None
+
+
+def _safe_task_id(raw: str) -> str:
+    import re
+    s = re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "")).strip("-.")
+    return s or "task"
+
+
+def cmd_gen(prompt: str, auto_run: bool = False) -> int:
+    """自然言語の依頼からタスクを生成して data/tasks/ に書き、必要なら実行(background 想定)。"""
+    cfg = load_config()
+    DATA.mkdir(parents=True, exist_ok=True)
+    print("▶ タスク生成中 …")
+    obj = generate_task(prompt, cfg)
+    if not isinstance(obj, dict) or not obj.get("id") or not obj.get("goal"):
+        print("生成に失敗しました(モデル出力が不正)。")
+        return 1
+    base = _safe_task_id(obj["id"])
+    tid, n = base, 2
+    while (TASKS_DIR / f"{tid}.md").exists():
+        tid, n = f"{base}-{n}", n + 1
+    fm: dict = {"id": tid, "goal": str(obj.get("goal", "")).strip("\n")}
+    acc = [str(x).strip() for x in (obj.get("accept") or []) if str(x).strip()]
+    if acc:
+        fm["accept"] = acc
+    verify = str(obj.get("verify", "") or "").strip("\n")
+    if verify:
+        fm["verify"] = verify
+    cons = [str(x).strip() for x in (obj.get("constraints") or []) if str(x).strip()]
+    if cons:
+        fm["constraints"] = cons
+    at = str(obj.get("allowed_tools", "") or "").strip()
+    if at:
+        fm["allowed_tools"] = at
+    ma = obj.get("max_attempts")
+    if isinstance(ma, int) and ma > 0:
+        fm["max_attempts"] = ma
+    fm["status"] = "todo"
+    p = write_task(tid, fm, str(obj.get("notes", "") or ""))
+    auto_commit(DATA, [p], f"todo: {tid} をプロンプトから生成")
+    print(f"  · 生成: {tid}")
+    if auto_run:
+        return cmd_run(tid)
+    return 0
 
 
 # --- 証拠収集 ---
@@ -658,7 +714,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         # 1) Explorer(read-only、失敗は致命でない)
         print("  · Explorer 調査中 …")
         e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
-                               agents["explorer_model"], agents["explorer_tools"], run_dir)
+                               agents["explorer_model"], agents["explorer_tools"], run_dir, read_only=True)
         explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
 
         # 2) Implementer(read-write、ここが本作業)
@@ -691,7 +747,8 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                 v_result, v_hint = run_role(
                     "verifier", render_verifier_prompt(task, diff_text, test_output),
                     wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
-                    extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)])
+                    extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)],
+                    read_only=True)
                 verifier_verdict, verifier_obj = parse_verifier(v_result, v_hint, run_dir)
                 if verifier_verdict != "handoff":
                     break
@@ -823,10 +880,12 @@ def main() -> int:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     if cmd == "run":
         return cmd_run(sys.argv[2] if len(sys.argv) > 2 else None)
+    if cmd == "gen":
+        return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in sys.argv[3:])
     table = {"reindex": cmd_reindex, "review": cmd_review, "status": cmd_status}
     if cmd in table:
         return table[cmd]()
-    print(f"unknown command: {cmd}\nusage: runner.py [run [task_id]|review|reindex|status]", file=sys.stderr)
+    print(f"unknown command: {cmd}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|review|reindex|status]", file=sys.stderr)
     return 2
 
 

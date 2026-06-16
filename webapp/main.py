@@ -168,10 +168,11 @@ def _latest_runs() -> dict:
 
 
 @app.get("/todo", response_class=HTMLResponse)
-def todo_list(request: Request, started: str = ""):
+def todo_list(request: Request, started: str = "", generating: int = 0):
     return templates.TemplateResponse(request, "todo_list.html", {
         "tasks": runner.parse_tasks(), "last": _latest_runs(),
-        "running": (runner.DATA / ".run.lock").exists(), "started": started})
+        "running": (runner.DATA / ".run.lock").exists(), "started": started,
+        "generating": bool(generating)})
 
 
 @app.get("/todo/new", response_class=HTMLResponse)
@@ -190,28 +191,15 @@ def todo_new_manual(request: Request):
 
 
 @app.post("/todo/generate")
-def todo_generate(request: Request, prompt: str = Form(""), auto_run: str = Form("")):
-    prompt = prompt.strip()
-    if not prompt:
+def todo_generate(prompt: str = Form(""), auto_run: str = Form("")):
+    # 生成(claude -p, 数十秒)は background に投げて即リダイレクト。完了後リロードで一覧に現れる。
+    if not prompt.strip():
         return RedirectResponse("/todo/new", status_code=303)
-    obj = runner.generate_task(prompt, runner.load_config())
-    if not obj or not obj.get("id") or not obj.get("goal"):
-        return templates.TemplateResponse(request, "todo_new.html", {
-            "prompt": prompt, "error": "生成に失敗しました(モデル出力が不正)。文言を変えて再試行するか、手動作成へ。"})
-    # id を安全化 + 一意化
-    base = _safe_id(re.sub(r"[^A-Za-z0-9._-]+", "-", obj["id"]).strip("-.")) or "task"
-    tid, n = base, 2
-    while (runner.TASKS_DIR / f"{tid}.md").exists():
-        tid, n = f"{base}-{n}", n + 1
-    fm = _fm_from_form(tid, obj.get("goal", ""), obj.get("accept") or [], obj.get("verify", "") or "",
-                       obj.get("constraints") or [], obj.get("allowed_tools", "") or "",
-                       obj.get("max_attempts", ""), "todo")
-    p = runner.write_task(tid, fm, obj.get("notes", "") or "")
-    runner.auto_commit(runner.DATA, [p], f"todo: {tid} をプロンプトから生成")
-    if auto_run and not (runner.DATA / ".run.lock").exists():
-        subprocess.Popen(["uv", "run", "runner.py", "run", tid], cwd=str(ROOT))
-        return RedirectResponse(f"/todo?started={tid}", status_code=303)
-    return RedirectResponse(f"/todo/{tid}?generated=1", status_code=303)
+    args = ["uv", "run", "runner.py", "gen", prompt.strip()]
+    if auto_run:
+        args.append("--run")
+    subprocess.Popen(args, cwd=str(ROOT))
+    return RedirectResponse("/todo?generating=1", status_code=303)
 
 
 @app.get("/todo/{task_id}", response_class=HTMLResponse)

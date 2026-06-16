@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}TODO — loop{% endblock %}
 {% block body %}
+{% if generating %}<meta http-equiv="refresh" content="6; url=/todo">{% endif %}
 <h2>タスク <span class="muted">(data/tasks/ — {{ tasks|length }} 件)</span> <a href="/todo/new">＋ 新規</a></h2>
+{% if generating %}<p class="handoff">⏳ タスクを生成中…(Claude Code が設計中。数十秒。自動でリロードします)</p>{% endif %}
 {% if running %}<p class="timeout">● run 実行中(data/.run.lock)。完了まで新規実行は待機されます。</p>{% endif %}
 {% if started and started != 'busy' %}<p class="pass">▶ {{ started }} を実行開始しました(バックグラウンド)。完了後に最新 run 欄へ反映されます。</p>{% endif %}
 {% if started == 'busy' %}<p class="timeout">他の run が進行中のため実行できませんでした。</p>{% endif %}
