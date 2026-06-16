@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -181,6 +182,44 @@ def _latest_runs() -> dict:
     except Exception:
         pass
     return last
+
+
+def _read_run_status() -> dict | None:
+    """data/.run.lock(=ロック兼ステータス)を読む。実行中でなければ None。"""
+    lock = runner.DATA / ".run.lock"
+    if not lock.exists():
+        return None
+    try:
+        d = json.loads(lock.read_text(encoding="utf-8") or "{}")
+    except (json.JSONDecodeError, OSError):
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    d.setdefault("phase", "start")
+    st = d.get("started_at")
+    if st:
+        try:
+            t = datetime.fromisoformat(st)
+            now = datetime.now(t.tzinfo) if t.tzinfo else datetime.now()
+            d["elapsed"] = int((now - t).total_seconds())
+        except ValueError:
+            d["elapsed"] = None
+    return d
+
+
+@app.get("/monitor", response_class=HTMLResponse)
+def monitor(request: Request):
+    status = _read_run_status()
+    conn = loopdb.connect(runner.DB)
+    recent = [dict(r) for r in conn.execute(
+        "SELECT run_id, task, verdict, reviewed, repo, started_at FROM runs "
+        "ORDER BY started_at DESC, run_id DESC LIMIT 12")]
+    unreviewed = conn.execute("SELECT COUNT(*) FROM runs WHERE reviewed=0").fetchone()[0]
+    conn.close()
+    pending = sum(1 for t in runner.parse_tasks() if str(t.get("status", "todo")).lower() == "todo")
+    return templates.TemplateResponse(request, "monitor.html", {
+        "status": status, "recent": recent, "unreviewed": unreviewed, "pending": pending,
+        "phases": [("explorer", "Explorer"), ("implementer", "Implementer"), ("verifier", "検証/Verifier")]})
 
 
 @app.get("/todo", response_class=HTMLResponse)

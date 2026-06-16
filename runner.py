@@ -276,6 +276,22 @@ def commit_worktree(wt: Path, message: str) -> bool:
     return True
 
 
+def write_run_status(**fields) -> None:
+    """実行中の状態を data/.run.lock(=ロック兼ステータス)に JSON で書く。Web 監視が読む。"""
+    lock = DATA / ".run.lock"
+    try:
+        cur = {}
+        if lock.exists():
+            try:
+                cur = json.loads(lock.read_text(encoding="utf-8") or "{}")
+            except json.JSONDecodeError:
+                cur = {}
+        cur.update(fields)
+        lock.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
     """種類A: チェックポイントコミット。loop.db(ビュー)は .gitignore 済みなので入らない。"""
     rels = [str(p.relative_to(repo)) for p in paths if p and p.exists()]
@@ -755,14 +771,18 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         wt.mkdir(parents=True, exist_ok=True)
     else:
         wt, branch = add_worktree(repo, run_id)
+    repo_label = str(repo) if repo else "none"
     try:
         # 1) Explorer(read-only、失敗は致命でない)
+        write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
+                         started_at=started_at, phase="explorer")
         print("  · Explorer 調査中 …")
         e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
                                agents["explorer_model"], agents["explorer_tools"], run_dir, read_only=True)
         explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
 
         # 2) Implementer(read-write、ここが本作業)
+        write_run_status(phase="implementer")
         print("  · Implementer 実装中 …")
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
         i_result, i_hint = run_role("implementer", render_implementer_prompt(task, explorer_findings),
@@ -783,6 +803,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             retryable = True
         else:
             # 3) 決定論テスト(証拠)
+            write_run_status(phase="verifier")
             test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"
             # 4) Verifier(別モデル、read-only、構造化出力)。handoff の間は再判定(冪等で安全)。
             vmax = int(loop.get("verifier_attempts", 3))
