@@ -5,6 +5,9 @@ __pycache__/
 .loop-worktrees/
 # 契約データは別の private git repo(エンジン=公開 repo には含めない)
 data/
+# 認証情報(平文トークン/秘密鍵)と監査ログは公開 repo に含めない(§7.4 / §7.7)
+auth.toml
+logs/
 # WatchPaths ログ / launchd plist は環境ローカルに生成される
 .watch.log
 launchd/com.loop.watch.plist
