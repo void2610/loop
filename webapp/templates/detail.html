@@ -10,8 +10,25 @@
     <h3>front-matter</h3>
     <dl>{% for k,v in fm.items() %}<dt>{{k}}</dt><dd>{{v}}</dd>{% endfor %}</dl>
 
-    <h3>エージェントがやったこと <span class="muted">(runner の事実要約)</span></h3>
+    <h3>エージェントがやったこと <span class="muted">(Implementer の最終出力)</span></h3>
     <pre>{{ summary or "(最終出力なし)" }}</pre>
+
+    {% if verifier %}
+    <h3>Verifier の判定 <span class="muted">(種類A / 自動・別モデル。人間の判断ではない)</span></h3>
+    <dl>
+      <dt>verdict</dt><dd class="{{ fm.verifier_verdict }}">{{ fm.verifier_verdict }}</dd>
+      <dt>confidence</dt><dd>{{ verifier.confidence }}</dd>
+      <dt>gaming 疑い</dt><dd>{{ verifier.test_gaming_suspected }}</dd>
+    </dl>
+    <pre>{{ verifier.reasons }}</pre>
+    {% if verifier.criteria %}
+    <ul>
+      {% for c in verifier.criteria %}
+        <li>{{ "✓" if c.met else "✗" }} {{ c.criterion }}{% if c.evidence %} — <span class="muted">{{ c.evidence }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% endif %}
 
     <h3>証拠</h3>
     {% if evidence["test-output.txt"] %}

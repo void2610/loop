@@ -135,6 +135,51 @@ def render_prompt(task: dict) -> str:
     return "\n".join(parts)
 
 
+def render_explorer_prompt(task: dict) -> str:
+    parts = [
+        "あなたは隔離された git worktree 内の Explorer です。**実装はしないでください**。",
+        "次のゴールについて、関連ファイル・前提・リスク・推奨アプローチを箇条書きで簡潔に報告してください。",
+        f"\n# ゴール\n{task['goal']}",
+    ]
+    if task.get("accept"):
+        parts.append("\n# 受け入れ基準\n" + "\n".join(f"- {a}" for a in task["accept"]))
+    if task.get("constraints"):
+        parts.append("\n# 制約\n" + "\n".join(f"- {c}" for c in task["constraints"]))
+    return "\n".join(parts)
+
+
+def render_implementer_prompt(task: dict, explorer_findings: str) -> str:
+    base = render_prompt(task)
+    return base + f"\n\n# 調査メモ(Explorer による事前調査。参考にしてよいが鵜呑みにしない)\n{explorer_findings}"
+
+
+def render_verifier_prompt(task: dict, diff_text: str, test_output: str) -> str:
+    accept = "\n".join(f"- {a}" for a in (task.get("accept") or [])) or "(明示なし)"
+    constraints = "\n".join(f"- {c}" for c in (task.get("constraints") or [])) or "(なし)"
+    return f"""あなたは独立した受け入れ判定者(Verifier)です。**実装者の自己申告を信じてはいけません。**
+受け入れ基準を 1 つずつ、下の diff と検証出力、および worktree 内の実ファイル(Read/Grep/Glob 可)に照らして検証してください。
+テストを通すためだけの gaming(本質を解かずテストを書き換える等)や、spec の部分的未達を積極的に疑ってください。
+判定はスキーマに従い構造化出力で返してください。
+
+# ゴール
+{task['goal']}
+
+# 受け入れ基準(すべて満たすこと)
+{accept}
+
+# 制約(違反していないか)
+{constraints}
+
+# 実装の diff
+```diff
+{diff_text[:6000]}
+```
+
+# 決定論テストの出力
+{test_output[:4000]}
+"""
+
+
 # --- git ---
 
 def repo_root(cfg: dict) -> Path:
@@ -181,42 +226,84 @@ def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
     git(repo, "commit", "-q", "-m", message)
 
 
-# --- headless 実行 ---
+# --- headless 実行(役割ごと) ---
 
-def run_claude(prompt: str, wt: Path, cfg: dict, task: dict, run_dir: Path) -> tuple[dict | None, str]:
+def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
+             tools: list[str], run_dir: Path,
+             extra_args: list[str] | None = None) -> tuple[dict | None, str]:
+    """役割を1つ headless 実行し {role}.result.json / {role}.stderr.log を保存する。"""
     loop = cfg["loop"]
-    model = task.get("model") or loop["model"]
-    tools = task.get("allowed_tools")
-    if isinstance(tools, str):
-        tools = [s.strip() for s in tools.split(",") if s.strip()]
-    tools = tools or loop["default_allowed_tools"]
-
     cmd = [
         "claude", "-p", prompt,
         "--output-format", "json",
         "--model", model,
-        "--max-turns", str(loop["max_turns"]),
+        "--max-turns", str(loop.get("max_turns", 40)),
         "--max-budget-usd", str(loop["max_budget_usd"]),
         "--permission-mode", loop.get("permission_mode", "default"),
         "--allowedTools", *tools,
     ]
-    stderr_log = run_dir / "stderr.log"
+    if extra_args:
+        cmd += extra_args
+    err = run_dir / f"{role}.stderr.log"
     try:
-        proc = subprocess.run(
-            cmd, cwd=str(wt), capture_output=True, text=True, timeout=loop["timeout_seconds"],
-        )
+        proc = subprocess.run(cmd, cwd=str(wt), capture_output=True, text=True,
+                              timeout=loop["timeout_seconds"])
     except subprocess.TimeoutExpired as e:
-        stderr_log.write_text(e.stderr if isinstance(e.stderr, str) else "", encoding="utf-8")
+        err.write_text(e.stderr if isinstance(e.stderr, str) else "", encoding="utf-8")
         return None, "timeout"
-
-    stderr_log.write_text(proc.stderr or "", encoding="utf-8")
+    err.write_text(proc.stderr or "", encoding="utf-8")
     try:
         result = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        (run_dir / "result.raw.txt").write_text(proc.stdout or "", encoding="utf-8")
+        (run_dir / f"{role}.result.raw.txt").write_text(proc.stdout or "", encoding="utf-8")
         return None, "error"
-    (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    (run_dir / f"{role}.result.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result, ("error" if result.get("is_error") else "ok")
+
+
+def resolve_tools(value, fallback: list[str]) -> list[str]:
+    if isinstance(value, str):
+        value = [s.strip() for s in value.split(",") if s.strip()]
+    return value or fallback
+
+
+# --- Verifier(別モデル・read-only・構造化出力) ---
+
+VERIFIER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"enum": ["pass", "fail", "handoff"]},
+        "criteria": {"type": "array", "items": {"type": "object", "properties": {
+            "criterion": {"type": "string"}, "met": {"type": "boolean"},
+            "evidence": {"type": "string"}}, "required": ["criterion", "met"]}},
+        "test_gaming_suspected": {"type": "boolean"},
+        "reasons": {"type": "string"},
+        "confidence": {"enum": ["high", "medium", "low"]},
+    },
+    "required": ["verdict", "reasons", "confidence"],
+}
+
+
+def parse_verifier(result: dict | None, hint: str, run_dir: Path) -> tuple[str, dict | None]:
+    """Verifier の構造化出力(result.json の structured_output フィールド)を取り出す。
+    判定不能は安全側で handoff(暗黙 pass にしない)。"""
+    if hint != "ok" or not result:
+        return "handoff", None
+    obj = result.get("structured_output")
+    if not isinstance(obj, dict):
+        return "handoff", None
+    (run_dir / "verifier.json").write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    v = obj.get("verdict", "handoff")
+    return (v if v in ("pass", "fail", "handoff") else "handoff"), obj
+
+
+def combine_verdict(test_verdict: str, verifier_verdict: str) -> str:
+    if test_verdict == "fail":
+        return "fail"
+    if verifier_verdict in ("fail", "handoff"):
+        return verifier_verdict
+    return "pass"
 
 
 # --- 証拠収集 ---
@@ -232,9 +319,9 @@ def run_verify(task: dict, wt: Path, run_dir: Path) -> tuple[str, int | None]:
     verify = task.get("verify")
     if not verify:
         (run_dir / "test-output.txt").write_text(
-            "verify コマンド未指定。決定論で二値判定できないため handoff。\n", encoding="utf-8"
+            "verify コマンド未指定 → 決定論テストなし(none)。Verifier の判定に委譲する。\n", encoding="utf-8"
         )
-        return "handoff", None
+        return "none", None
     proc = subprocess.run(verify, shell=True, cwd=str(wt), capture_output=True, text=True)
     out = f"$ {verify}\n[exit {proc.returncode}]\n\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
     (run_dir / "test-output.txt").write_text(out, encoding="utf-8")
@@ -252,18 +339,27 @@ def copy_transcript(result: dict | None, run_dir: Path) -> None:
 # --- run MD 出力(契約の源) ---
 
 def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
-                 cfg: dict, started_at: str, verify_code: int | None) -> Path:
+                 cfg: dict, started_at: str, verify_code: int | None,
+                 test_verdict: str = "none", verifier_verdict: str = "handoff",
+                 verifier_obj: dict | None = None, roles: dict | None = None) -> Path:
     repo = repo_root(cfg)
     repo_sha = git(repo, "rev-parse", "HEAD").stdout.strip()
     skill_sha = git(repo, "rev-parse", "HEAD:.claude/skills").stdout.strip()
+    roles = roles or {}
+
+    cost_total = sum(r["total_cost_usd"] for r in roles.values() if r and r.get("total_cost_usd") is not None) or None
+    turns_total = sum(r["num_turns"] for r in roles.values() if r and r.get("num_turns") is not None) or None
 
     fm = {
         "task": task["id"],
         "verdict": verdict,
         "reviewed": "false",
-        "model": (result or {}).get("model") or task.get("model") or cfg["loop"]["model"],
-        "cost_usd": (result or {}).get("total_cost_usd"),
-        "turns": (result or {}).get("num_turns"),
+        "test_verdict": test_verdict,
+        "verifier_verdict": verifier_verdict,
+        "verifier_confidence": (verifier_obj or {}).get("confidence") or None,
+        "model": cfg["agents"]["implementer_model"],
+        "cost_usd": cost_total if cost_total is not None else (result or {}).get("total_cost_usd"),
+        "turns": turns_total if turns_total is not None else (result or {}).get("num_turns"),
         "duration_ms": (result or {}).get("duration_ms"),
         "session_id": (result or {}).get("session_id"),
         "repo_sha": repo_sha,
@@ -273,18 +369,44 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
     }
     fm_lines = "\n".join(f"{k}: {v}" for k, v in fm.items() if v is not None)
 
-    # 種類A: 「やったこと」はエージェント自身の最終出力をそのまま載せる(runner は再要約しない)。
-    summary = (result or {}).get("result") or "（最終出力なし。stderr.log / transcript を参照）"
+    # 種類A: 「やったこと」は Implementer 自身の最終出力をそのまま載せる(runner は再要約しない)。
+    summary = (result or {}).get("result") or "（最終出力なし。implementer.stderr.log / transcript を参照）"
 
     evidence = []
     if task.get("verify"):
-        ok = "全通過" if verdict == "pass" else f"失敗 (exit {verify_code})"
-        evidence.append(f"- 検証 `{task['verify']}`: {ok} — test-output.txt")
+        ok = {"pass": "全通過", "fail": f"失敗 (exit {verify_code})", "none": "なし"}.get(test_verdict, test_verdict)
+        evidence.append(f"- 決定論テスト `{task['verify']}`: {ok} — test-output.txt")
     evidence.append("- diff: change.patch")
     if (RUNS / run_id / "transcript.jsonl").exists():
-        evidence.append("- transcript: transcript.jsonl")
+        evidence.append("- transcript: transcript.jsonl(Implementer セッション)")
 
     accept = "\n".join(f"- {a}" for a in (task.get("accept") or [])) or "(なし)"
+
+    # 役割別実行テーブル(model は result.json の modelUsage キーから取る)
+    role_rows = []
+    for r, label in (("explorer", "Explorer"), ("implementer", "Implementer"), ("verifier", "Verifier")):
+        d = roles.get(r)
+        if d:
+            model = next(iter(d.get("modelUsage") or {}), "")
+            role_rows.append(f"| {label} | {model} | {d.get('total_cost_usd', '')} | {d.get('num_turns', '')} |")
+        else:
+            role_rows.append(f"| {label} | — | — | — |")
+    role_table = "\n".join(role_rows)
+
+    # Verifier 判定(事実表示。種類B ではない)
+    if verifier_obj:
+        crit = "\n".join(
+            f"  - [{'✓' if c.get('met') else '✗'}] {c.get('criterion', '')} — {c.get('evidence', '')}"
+            for c in (verifier_obj.get("criteria") or [])
+        ) or "  (基準内訳なし)"
+        verifier_block = (
+            f"- verdict: {verifier_verdict} / confidence: {verifier_obj.get('confidence', '')}\n"
+            f"- test gaming 疑い: {verifier_obj.get('test_gaming_suspected', '')}\n"
+            f"- 理由: {verifier_obj.get('reasons', '')}\n"
+            f"- 基準ごと:\n{crit}"
+        )
+    else:
+        verifier_block = f"- verdict: {verifier_verdict}(構造化出力なし / 判定不能)"
 
     body = f"""---
 {fm_lines}
@@ -297,9 +419,17 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
 {accept}
 
 ## エージェントがやったこと
-（claude -p の最終出力＝エージェント自身の報告。runner は再要約しない）
+（Implementer の最終出力＝エージェント自身の報告。runner は再要約しない）
 
 {summary}
+
+## 役割別実行
+| 役割 | model | cost_usd | turns |
+|---|---|---|---|
+{role_table}
+
+## Verifier の判定（種類A / 自動。人間の判断ではない）
+{verifier_block}
 
 ## 証拠
 {chr(10).join(evidence)}
@@ -455,35 +585,67 @@ def cmd_run() -> int:
         run_dir.mkdir(parents=True, exist_ok=True)
         started_at = now.isoformat(timespec="seconds")
 
+        agents = cfg["agents"]
+        if agents["verifier_model"] == agents["implementer_model"]:
+            print("  ! 警告: verifier_model が implementer_model と同一。別モデルにすべき(記事の Sub-agents の肝)。")
+
         print(f"▶ run: {run_id}")
         repo = repo_root(cfg)
         wt, branch = add_worktree(repo, run_id)
         try:
-            print("  · claude -p 実行中 …")
-            result, hint = run_claude(render_prompt(task), wt, cfg, task, run_dir)
-            copy_transcript(result, run_dir)
+            # 1) Explorer(read-only、失敗は致命でない)
+            print("  · Explorer 調査中 …")
+            e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
+                                   agents["explorer_model"], agents["explorer_tools"], run_dir)
+            explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
+
+            # 2) Implementer(read-write、ここが本作業)
+            print("  · Implementer 実装中 …")
+            i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
+            i_result, i_hint = run_role("implementer", render_implementer_prompt(task, explorer_findings),
+                                        wt, cfg, agents["implementer_model"], i_tools, run_dir)
+            copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
             capture_diff(wt, run_dir)
 
-            if hint == "timeout":
-                verdict, vcode = "timeout", None
-            elif hint == "error":
-                verdict, vcode = "fail", None
+            verifier_obj = None
+            if i_hint == "timeout":
+                final, test_verdict, verifier_verdict, vcode = "timeout", "none", "handoff", None
+            elif i_hint == "error":
+                final, test_verdict, verifier_verdict, vcode = "fail", "none", "handoff", None
             else:
-                verdict, vcode = run_verify(task, wt, run_dir)
+                # 3) 決定論テスト(証拠)
+                test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"
+                # 4) Verifier(別モデル、read-only、構造化出力)
+                print("  · Verifier 判定中 …")
+                diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
+                tp = run_dir / "test-output.txt"
+                test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+                v_result, v_hint = run_role(
+                    "verifier", render_verifier_prompt(task, diff_text, test_output),
+                    wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
+                    extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)])
+                verifier_verdict, verifier_obj = parse_verifier(v_result, v_hint, run_dir)
+                final = combine_verdict(test_verdict, verifier_verdict)
 
             # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
-            committed = commit_worktree(wt, f"loop run {run_id} → {verdict}")
+            committed = commit_worktree(wt, f"loop run {run_id} → {final}")
 
-            md = write_run_md(task, run_id, verdict, result, cfg, started_at, vcode)
-            update_status(task["id"], verdict)
+            roles = {}
+            for r in ("explorer", "implementer", "verifier"):
+                p = run_dir / f"{r}.result.json"
+                roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+            md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
+                              test_verdict, verifier_verdict, verifier_obj, roles)
+            update_status(task["id"], final)
 
             conn = loopdb.connect(DB)
             loopdb.upsert_md(conn, md)
             conn.close()
 
-            auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {verdict}")
+            auto_commit(DATA, [md, run_dir, TODO], f"run: {run_id} → {final}")
 
-            print(f"  · verdict: {verdict}")
+            print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
             print(f"  · run MD: {md.relative_to(DATA)}（判断は未記入 / reviewed:false）")
             branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
             print(f"  · SQLite upsert 済 / data へ自動コミット済 / {branch_note}")

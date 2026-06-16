@@ -76,10 +76,17 @@ def detail(request: Request, run_id: str):
     summary = ""
     if "## エージェントがやったこと" in text:
         after = text.split("## エージェントがやったこと", 1)[1]
-        summary = after.split("## 証拠", 1)[0]
+        summary = after.split("\n## ", 1)[0]  # 次の見出し(役割別実行)の手前まで
         summary = "\n".join(l for l in summary.splitlines() if not l.startswith("（")).strip()
+    vjson = RUNS / run_id / "verifier.json"
+    verifier = None
+    if vjson.exists():
+        try:
+            verifier = json.loads(vjson.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            verifier = None
     return templates.TemplateResponse(request, "detail.html", {
-        "run_id": run_id, "fm": fm, "summary": summary,
+        "run_id": run_id, "fm": fm, "summary": summary, "verifier": verifier,
         "evidence": _evidence(run_id), "judgment": runner.parse_judgment(md),
         "fields": runner.JUDGMENT_FIELDS,
     })

@@ -56,12 +56,21 @@ clone 後に1回:
 
 ## 1 run の流れ(runner.py / 種類A)
 
-`TODO.md` パース → `git worktree` 隔離 → `claude -p`(予算上限つき)→ 決定論の検証ゲート → 自動チェックポイントコミット → `runs/<id>.md` 生成(front-matter・証拠・エージェント最終出力、判断は空 / `reviewed:false`)→ SQLite upsert → worktree 後始末(成功 branch / patch は保持)。
+`TODO.md` パース → `git worktree` 隔離 → **3役 Sub-agents** → 自動チェックポイントコミット(成果を `loop/<id>` ブランチへ)→ `runs/<id>.md` 生成(front-matter・証拠・判断は空 / `reviewed:false`)→ SQLite upsert → worktree 後始末。
 
-- 停止条件: `--max-budget-usd`(コスト上限) + runner の wall-clock タイムアウト。
-  ※ 現行 CLI に `--max-turns` は無いため turn 上限は使わない(plan §8 と差異)。
+3役(記事の Sub-agents モジュール。`[agents]` でモデル/ツールを指定):
+
+1. **Explorer**(高速モデル / read-only)— 実装せず、関連ファイル・前提・リスクを調査。失敗しても継続。
+2. **Implementer**(主力モデル / read-write)— Explorer findings + 目標契約で実装。
+3. **決定論テスト**(`verify`)→ `test_verdict ∈ {pass, fail, none}`。
+4. **Verifier**(**別モデル必須** / read-only / 構造化出力)— 自己申告を信じず受け入れ基準を独立判定。test gaming / 部分未達を疑う。→ `verifier_verdict ∈ {pass, fail, handoff}`。
+
+最終 verdict = `combine(test, verifier)`: test=fail なら fail / verifier=fail なら fail(テスト緑でも gaming を捕捉)/ verifier=handoff なら handoff / それ以外 pass。Verifier の判定は **事実セクション**に記録し、`## 判断`(種類B)は空のまま人間が書く。
+
+- 停止条件: turn 上限 `--max-turns`(暴走の一次ガード)+ `--max-budget-usd` + wall-clock タイムアウトの3段。各役呼び出しに効く。
+- コストは約3倍(1 run = 3 モデル呼び出し)。`verifier_model` は `implementer_model` と別にすること(同一なら起動時警告)。
 - 再現性: `--bare` を使わず、`skill_sha` と `goal_contract_sha` を front-matter に刻む。
-- 「やったこと」はエージェントの最終出力をそのまま載せる(runner は再要約しない=種類B を侵さない)。
+- 「やったこと」は Implementer の最終出力をそのまま載せる(runner は再要約しない=種類B を侵さない)。
 
 ## 構成
 

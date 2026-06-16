@@ -19,6 +19,18 @@ default_allowed_tools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]
 # permission-mode。default だと未認可ツールはブロックされる(承認する人間がいないため)。
 permission_mode = "default"
 
+[agents]
+# Sub-agents 3役。Verifier は Implementer と必ず別モデルにすること(記事の Sub-agents の肝)。
+# 書いた本人は自分に高得点をつけるため、独立した別モデルが受け入れ基準を再判定する。
+explorer_model    = "claude-haiku-4-5-20251001"   # 高速・調査(read-only)
+implementer_model = "claude-sonnet-4-6"           # 主力(従来の maker)
+verifier_model    = "claude-opus-4-8"             # 別モデル必須(implementer と異なること)
+
+# 役割ごとの allowed_tools。Explorer/Verifier は read-only を厳守(判定者は直さない)。
+explorer_tools    = ["Read", "Grep", "Glob"]
+implementer_tools = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]  # task 側で上書き可
+verifier_tools    = ["Read", "Grep", "Glob"]
+
 [repo]
 # worktree を切る対象リポジトリ。"." はこの loop ディレクトリ自身。
 path = "."
