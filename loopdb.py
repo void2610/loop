@@ -14,6 +14,7 @@ COLUMNS = [
     "duration_ms", "session_id", "repo_sha", "skill_sha", "goal_contract_sha",
     "started_at", "md_path",
     "test_verdict", "verifier_verdict", "verifier_confidence", "repo", "archived",
+    "human_verdict",
 ]
 
 SCHEMA = """
@@ -36,7 +37,8 @@ CREATE TABLE IF NOT EXISTS runs (
   verifier_verdict    TEXT,
   verifier_confidence TEXT,
   repo                TEXT,
-  archived            INTEGER
+  archived            INTEGER,
+  human_verdict       TEXT
 );
 """
 
@@ -110,6 +112,7 @@ def _coerce(fm: dict, run_id: str, md_path: str) -> dict:
         "verifier_confidence": fm.get("verifier_confidence"),
         "repo": fm.get("repo"),
         "archived": 1 if str(fm.get("archived", "false")).lower() in ("true", "1") else 0,
+        "human_verdict": fm.get("human_verdict"),
     }
 
 

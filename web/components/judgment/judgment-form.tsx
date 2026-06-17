@@ -16,12 +16,19 @@ export type JudgmentValues = Record<string, string>;
 
 export type JudgmentFormHandle = { save: () => void };
 
+// 人間が選べる verdict(覆し用)。空 = 覆さない。runner の判定は別物(参照のみ)。
+const HUMAN_VERDICTS = ["pass", "fail", "revise", "handoff"] as const;
+
 type Props = {
   runId: string;
   // [key, label]。runner.JUDGMENT_FIELDS が唯一の源(RunDetail.judgment_fields)。
   fields: string[][];
   values: JudgmentValues;
   reviewed: boolean;
+  // runner の判定(参照表示のみ。select の初期値には流し込まない=自動入力しない)。
+  verdict: string;
+  // 人間が過去に覆した判定(prefill)。空=未覆し。
+  humanVerdict: string;
   // 保存成功後に親へ通知(次 run 遷移の導線は親が持つ)。
   onSaved?: () => void;
 };
@@ -30,13 +37,15 @@ type Props = {
 // 禁止(§6.7): オートサジェスト/補完/履歴、要約・下書き生成、テンプレ補完、推奨表示、必須化誘導、LLM 呼び出し。
 // Verifier/Implementer の出力を value/defaultValue に流し込まない。runner.write_judgment が唯一の保存通路。
 export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function JudgmentForm(
-  { runId, fields, values, reviewed, onSaved },
+  { runId, fields, values, reviewed, verdict, humanVerdict, onSaved },
   ref,
 ) {
   // 制御値。初期値は prefill(人間が過去に書いた値)のみ。verdict 等は一切反映しない。
   const initial: JudgmentValues = {};
   for (const [key] of fields) initial[key] = values[key] ?? "";
   const [state, setState] = useState<JudgmentValues>(initial);
+  // 覆し判定。初期値は人間が過去に覆した値のみ(runner の verdict は入れない=自動入力しない)。
+  const [human, setHuman] = useState<string>(humanVerdict ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedReviewed, setSavedReviewed] = useState(reviewed);
@@ -53,6 +62,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
         risk: state.risk ?? "",
         checks: state.checks ?? "",
         learning: state.learning ?? "",
+        human_verdict: human,
       };
       await api.putJudgment(runId, body);
       setSavedReviewed(true);
@@ -63,7 +73,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
     } finally {
       setSaving(false);
     }
-  }, [saving, state, runId, onSaved]);
+  }, [saving, state, human, runId, onSaved]);
 
   useImperativeHandle(ref, () => ({ save }), [save]);
 
@@ -101,6 +111,30 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
         ) : (
           <Badge variant="outline" className="text-muted-foreground">未レビュー</Badge>
         )}
+      </div>
+
+      <div className="flex items-center gap-2 border-b border-border/60 pb-3">
+        <Label htmlFor="human-verdict" className="th-label whitespace-nowrap">
+          verdict を覆す
+        </Label>
+        <select
+          id="human-verdict"
+          value={human}
+          onChange={(e) => setHuman(e.target.value)}
+          className="h-8 rounded-md border border-input bg-background/40 px-2 text-sm"
+        >
+          <option value="">覆さない(runner: {verdict || "?"} のまま)</option>
+          {HUMAN_VERDICTS.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+        {human && human !== verdict ? (
+          <Badge variant="outline" className="text-verdict-fail" title="覆し。保存時に規範候補が起草されます">
+            覆し
+          </Badge>
+        ) : null}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3">

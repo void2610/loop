@@ -1189,6 +1189,16 @@ def _set_fm_key(path: Path, key: str, value: str) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _clear_fm_key(path: Path, key: str) -> None:
+    """front-matter から key 行を削除する(無ければ何もしない)。"""
+    lines, s, e = _split_front_matter(path.read_text(encoding="utf-8"))
+    if e == 0:
+        return
+    kept = [l for i, l in enumerate(lines) if not (s <= i < e and l.split(":", 1)[0].strip() == key)]
+    if len(kept) != len(lines):
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
 def set_task_archived(task_id: str, archived: bool) -> bool:
     """タスクをアーカイブ/解除(削除しない=ログは資産)。front-matter の archived を立てる。"""
     t = next((x for x in parse_tasks() if x.get("id") == task_id), None)
@@ -1315,6 +1325,14 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
             section.append(val)
             section.append("")
     md.write_text("\n".join(lines[:head] + section).rstrip() + "\n", encoding="utf-8")
+
+    # human_verdict: 人間が verdict を覆すときだけ front-matter に刻む構造化シグナル(空=覆さない)。
+    # 不正値は無視(GUI の select が pass/fail/revise/handoff のみ送る)。覆しは maybe_draft_on_review が拾う。
+    hv = (fields.get("human_verdict") or "").strip()
+    if hv in ("pass", "fail", "revise", "handoff"):
+        _set_fm_key(md, "human_verdict", hv)
+    else:
+        _clear_fm_key(md, "human_verdict")
 
     checks = (fields.get("checks") or "").strip()
     if checks:

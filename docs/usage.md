@@ -72,8 +72,9 @@ repo バッジ + run_id + verdict + reviewed + cost + 開始時刻。verdict / r
 3. **監視する**: `/runs` の実行中行 → `/runs/<id>/live` でライブ transcript。
 4. **(任意)promote**: `promote_on_pass=true` なら pass の成果が自動で PR 化され、CI+Copilot が green まで回る(merge は人間)。
 5. **レビューする(種類B)**: `/runs/<id>` の判断フォーム or `just review`。信用できるか・失敗の形・
-   次に自動検証へ入れるべきチェックを書く → `review-notes.md` に蓄積。レビューで verdict を覆すときは run MD の
-   front-matter に `human_verdict: <verdict>` を書く(reviewed 化時に規範候補が自動起草される。手動は `runner.py norms draft <run_id>`)。
+   次に自動検証へ入れるべきチェックを書く → `review-notes.md` に蓄積。runner の verdict を覆すときは
+   フォームの「verdict を覆す」select(or run MD front-matter の `human_verdict: <verdict>`)で選ぶ
+   → 保存時に front-matter へ刻まれ、覆しなら規範候補が自動起草される(手動は `runner.py norms draft <run_id>`)。
 6. **規範を育てる(種類B)**: 摩擦 run から起草された規範候補を `runner.py norms` で裁定し、`conventions.md` へ昇格(文言確定は人間)。
    昇格した規範は以降の run に注入される(優先順位 `CLAUDE.md > conventions.md > 過去 run の事実`)。
 7. **分析する**: `just stats`(特に `gaming_suspects` = テスト緑 × Verifier fail)で skill 版ごとの傾向を見る。

@@ -532,9 +532,10 @@ export interface components {
         };
         /**
          * JudgmentInput
-         * @description 判断は trust/risk/checks/learning の4キーのみ。全デフォルト空文字。
+         * @description 判断は trust/risk/checks/learning の散文 4 キー + 任意の human_verdict。全デフォルト空文字。
          *
          *     サーバはどのフィールドにも値を合成しない。model_dump() を無変換で write_judgment へ。
+         *     human_verdict は人間が verdict を覆すときだけ選ぶ構造化シグナル(空=覆さない)。
          */
         JudgmentInput: {
             /**
@@ -557,6 +558,11 @@ export interface components {
              * @default
              */
             learning: string;
+            /**
+             * Human Verdict
+             * @default
+             */
+            human_verdict: string;
         };
         /** LastRun */
         LastRun: {

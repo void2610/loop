@@ -210,6 +210,8 @@ export function RunDetailView({ runId }: { runId: string }) {
             fields={detail.judgment_fields}
             values={detail.judgment as JudgmentValues}
             reviewed={reviewed}
+            verdict={verdict}
+            humanVerdict={fmString(fm, "human_verdict")}
             onSaved={goNext}
           />
         </div>
