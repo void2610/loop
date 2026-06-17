@@ -712,6 +712,22 @@ def copy_transcript(result: dict | None, run_dir: Path) -> None:
 
 # --- run MD 出力(契約の源) ---
 
+def _reindex_md(md: Path) -> None:
+    """単一 run MD を SQLite へ再導出する(connect→upsert→close)。"""
+    conn = loopdb.connect(DB)
+    loopdb.upsert_md(conn, md)
+    conn.close()
+
+
+def _finalize_run(task: dict, run_id: str, run_dir: Path, md: Path, final: str, commit_msg: str) -> None:
+    """run 確定の後処理(§4.3): task status 書換 / loop.db upsert / data commit を 1 ブロックで直列化。
+    N 本が同時にここへ来ても data/ の index.lock 競合や loop.db 書込み競合を避ける。"""
+    with _DATA_COMMIT_LOCK:
+        update_status(task["id"], final)
+        _reindex_md(md)
+        auto_commit(DATA, [md, run_dir, task.get("_path")], commit_msg)
+
+
 def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
                  cfg: dict, started_at: str, verify_code: int | None,
                  test_verdict: str = "none", verifier_verdict: str = "handoff",
@@ -869,9 +885,7 @@ def set_run_archived(run_id: str, archived: bool) -> bool:
     if not md.exists():
         return False
     _set_fm_key(md, "archived", "true" if archived else "false")
-    conn = loopdb.connect(DB)
-    loopdb.upsert_md(conn, md)
-    conn.close()
+    _reindex_md(md)
     verb = "アーカイブ" if archived else "アーカイブ解除"
     auto_commit(DATA, [md], f"run: {run_id} を{verb}")
     return True
@@ -888,9 +902,7 @@ def mark_reviewed(run_id: str, cfg: dict) -> None:
     """種類A: 判断記入後の後処理。reviewed 化 → SQLite upsert → コミット。"""
     md = RUNS / f"{run_id}.md"
     set_md_reviewed(md)
-    conn = loopdb.connect(DB)
-    loopdb.upsert_md(conn, md)
-    conn.close()
+    _reindex_md(md)
     auto_commit(DATA, [md], f"review: {run_id} を reviewed 化")
 
 
@@ -963,9 +975,7 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
             f.write(entry)
 
     set_md_reviewed(md)
-    conn = loopdb.connect(DB)
-    loopdb.upsert_md(conn, md)
-    conn.close()
+    _reindex_md(md)
     auto_commit(DATA, [md, REVIEW_NOTES], f"review: {run_id} 判断を記入し reviewed 化")
 
 
@@ -986,10 +996,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                          started_at=started_at, phase="verifier", verdict=None)
         md = write_run_md(task, run_id, "fail", None, cfg, started_at, None,
                           "none", "handoff", None, {}, repo=repo)
-        with _DATA_COMMIT_LOCK:  # 完了処理(task status / loop.db / commit)を一括で直列化(§4.3)
-            update_status(task["id"], "fail")
-            conn = loopdb.connect(DB); loopdb.upsert_md(conn, md); conn.close()
-            auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → fail(repo 不正)")
+        _finalize_run(task, run_id, run_dir, md, "fail", f"run: {run_id} → fail(repo 不正)")
         clear_run_status(run_id, "fail")
         print(f"  · repo が不正: {repo} → fail")
         return "fail", False
@@ -1064,14 +1071,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
 
         md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
                           test_verdict, verifier_verdict, verifier_obj, roles, repo=repo)
-        # 完了処理(task status 書換 / loop.db upsert / data/ commit)を 1 ブロックで直列化(§4.3)。
-        # N 本が同時にここへ来ても data/ の index.lock 競合や loop.db 書込み競合を避ける。
-        with _DATA_COMMIT_LOCK:
-            update_status(task["id"], final)
-            conn = loopdb.connect(DB)
-            loopdb.upsert_md(conn, md)
-            conn.close()
-            auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → {final}")
+        _finalize_run(task, run_id, run_dir, md, final, f"run: {run_id} → {final}")
 
         print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
         branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
