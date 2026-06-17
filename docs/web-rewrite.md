@@ -1,6 +1,10 @@
 # loop Web GUI 全面刷新 — 設計ドキュメント(ADR)
 
-> **ステータス: Draft / 提案**(2026-06-17)
+> **ステータス: 実装済み / 履歴 ADR**(2026-06-17 移行完了)。本書は Jinja→Next 移行時の設計記録。
+> **現状との差分(本書はこの点で古い)**: ① legacy(Jinja `/legacy/*`)は撤去済み(UI は Next `web/` に一本化)。
+> ② Monitor 画面は廃止し、実行中 run は `/runs` に統合(ライブは `/runs/<id>/live`)、件数は `/dashboard`。
+> ③ run の役割は Author(プラン)→ Implementer → Verifier + revise 差し戻し + promote(PR/CI/Copilot)に進化。
+> 現行仕様は [usage](./usage.md) / [runs](./runs.md) / [configuration](./configuration.md) と CLAUDE.md を正とする。
 > 本書は複数エージェントによる並列設計の成果を統合した初版である。各セクションの内容自体は実コードに接地済み。
 >
 > **正準セクション番号(この順序・番号を正とする。下の目次=本文見出しと一致):**
