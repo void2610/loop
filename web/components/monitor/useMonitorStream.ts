@@ -46,8 +46,9 @@ export function useMonitorStream(token?: string): MonitorState {
         unreviewed: snap.unreviewed ?? 0,
         pending: snap.pending ?? 0,
         phases: snap.phases ?? [],
-        // SSE 未到達の初期表示用に REST の status からも runs を導く(配列化)。
-        runs: prev.connected ? prev.runs : snapshotToRuns(snap),
+        // REST(.run.lock 由来)を進行中 run の権威とする。SSE は status 事件で上書き・補間するだけ。
+        // 以前は connected ガードで REST を握り潰し、rewrite 越し SSE の heartbeat だけ通ると永久に空になっていた。
+        runs: snapshotToRuns(snap),
         loading: false,
         error: null,
       }));
@@ -62,6 +63,8 @@ export function useMonitorStream(token?: string): MonitorState {
 
   React.useEffect(() => {
     void refetch();
+    // SSE が rewrite でバッファされ status が届かない場合の保険(REST を権威にポーリング)。
+    const poll = setInterval(() => void refetch(), 4000);
     const close = subscribeMonitor(
       {
         status: (d) => {
@@ -77,7 +80,10 @@ export function useMonitorStream(token?: string): MonitorState {
       },
       token
     );
-    return () => close();
+    return () => {
+      clearInterval(poll);
+      close();
+    };
   }, [refetch, token]);
 
   return state;

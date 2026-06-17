@@ -1,7 +1,7 @@
 import { RunLivePage } from "@/components/monitor/RunLivePage";
 
-// Next 15: dynamic route の params は Promise。server で unwrap して client へ渡す。
-export default async function MonitorLivePage({
+// 実行中 run のライブ transcript。Next 15: params は Promise なので server で unwrap。
+export default async function RunLiveRoute({
   params,
 }: {
   params: Promise<{ id: string }>;

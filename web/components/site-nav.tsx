@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ListChecks, Activity, Repeat } from "lucide-react";
+import { LayoutDashboard, ListChecks, Repeat } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/runs", label: "Runs", icon: Repeat },
   { href: "/tasks", label: "Tasks", icon: ListChecks },
-  { href: "/monitor", label: "Monitor", icon: Activity },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ] as const;
 

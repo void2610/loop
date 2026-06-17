@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type RunRow } from "@/lib/api";
 
 import { PageHeader } from "@/components/page-header";
+import { RunStatusCard } from "@/components/monitor/RunStatusCard";
+import { useMonitorStream } from "@/components/monitor/useMonitorStream";
 
 import { RunsFilterBar, type RunsFilter } from "./RunsFilterBar";
 import { RunsTable } from "./RunsTable";
@@ -20,6 +22,8 @@ export function RunsView() {
   const [dispatching, setDispatching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [includeArchived, setIncludeArchived] = useState(false);
+  // 実行中 run は loop.db 未登録なので SSE(.run.lock 由来)から取り、一覧の上に出す。
+  const { runs: activeRuns } = useMonitorStream();
 
   // 連打・タイプ中の古いレスポンスで新しい結果を上書きしないための世代カウンタ。
   const reqSeq = useRef(0);
@@ -104,6 +108,17 @@ export function RunsView() {
         onDispatch={onDispatch}
       />
 
+      {activeRuns.length > 0 ? (
+        <div className="space-y-2">
+          <p className="th-label">実行中(クリックでライブ)</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {activeRuns.map((r) => (
+              <RunStatusCard key={r.run_id} run={r} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {notice ? (
         <p className="text-sm text-muted-foreground">{notice}</p>
       ) : null}
@@ -116,7 +131,11 @@ export function RunsView() {
           読み込み中…
         </div>
       ) : (
-        <RunsTable runs={runs} onChanged={() => void load(filter, includeArchived)} />
+        <RunsTable
+          runs={runs}
+          active={activeRuns}
+          onChanged={() => void load(filter, includeArchived)}
+        />
       )}
     </div>
   );

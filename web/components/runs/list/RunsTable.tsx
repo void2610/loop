@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table";
 
 import { ArchiveRunButton } from "@/components/runs/ArchiveRunButton";
+import type { RunStatus } from "@/components/monitor/normalize";
 
 import { RepoBadge } from "./RepoBadge";
 import { RunVerdictBadge } from "./RunVerdictBadge";
@@ -32,10 +33,18 @@ function formatStarted(v: string | null | undefined): string {
   return (v ?? "").slice(0, 19);
 }
 
-export function RunsTable({ runs, onChanged }: { runs: RunRow[]; onChanged?: () => void }) {
+export function RunsTable({
+  runs,
+  active = [],
+  onChanged,
+}: {
+  runs: RunRow[];
+  active?: RunStatus[];
+  onChanged?: () => void;
+}) {
   const router = useRouter();
 
-  if (runs.length === 0) {
+  if (runs.length === 0 && active.length === 0) {
     return (
       <div className="surface flex flex-col items-center gap-1 p-12 text-center">
         <p className="text-sm font-medium text-foreground">該当する run がありません</p>
@@ -60,6 +69,31 @@ export function RunsTable({ runs, onChanged }: { runs: RunRow[]; onChanged?: () 
           </TableRow>
         </TableHeader>
         <TableBody>
+          {active.map((r) => (
+            <TableRow
+              key={`active-${r.run_id}`}
+              className="cursor-pointer bg-primary/5 transition-colors hover:bg-primary/10"
+              onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}/live`)}
+            >
+              <TableCell>
+                <RepoBadge repo={r.repo} />
+              </TableCell>
+              <TableCell className="font-mono text-xs text-foreground/90">{r.run_id}</TableCell>
+              <TableCell>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                  実行中{r.phase ? ` · ${r.phase}` : ""}
+                </span>
+              </TableCell>
+              <TableCell className="text-muted-foreground">·</TableCell>
+              <TableCell className="text-right tabular-nums" />
+              <TableCell className="text-right tabular-nums" />
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                {formatStarted(r.started_at)}
+              </TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">ライブ →</TableCell>
+            </TableRow>
+          ))}
           {runs.map((r) => (
             <TableRow
               key={r.run_id}

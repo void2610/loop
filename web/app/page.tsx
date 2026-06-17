@@ -4,9 +4,8 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 
 // 各ワークストリームの入口。リンク先は後続 WS が実装する(0.5 ゲートでは枠のみ)。
 const ENTRIES = [
-  { href: "/runs", title: "Runs", desc: "run 一覧と判断(種類B)レビュー" },
+  { href: "/runs", title: "Runs", desc: "run 一覧・実行中のライブ・判断(種類B)レビュー" },
   { href: "/tasks", title: "Tasks", desc: "目標契約(TODO)の作成・編集・実行" },
-  { href: "/monitor", title: "Monitor", desc: "実行中 run のライブ監視(SSE)" },
   { href: "/dashboard", title: "Dashboard", desc: "集計の事実提示(read-only)" },
 ];
 

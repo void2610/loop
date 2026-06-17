@@ -52,7 +52,7 @@ function PhaseStepper({ phase }: { phase?: string }) {
 
 export function RunStatusCard({ run }: { run: RunStatus }) {
   return (
-    <Link href={`/monitor/live/${encodeURIComponent(run.run_id)}`} className="block">
+    <Link href={`/runs/${encodeURIComponent(run.run_id)}/live`} className="block">
       <Card className="transition-colors hover:border-primary">
         <CardHeader className="space-y-2 pb-3">
           <div className="flex items-start justify-between gap-2">
