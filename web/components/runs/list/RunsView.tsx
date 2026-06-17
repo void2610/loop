@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, api, type RunRow } from "@/lib/api";
 
+import { ArchiveToggle } from "@/components/archive-toggle";
 import { PageHeader } from "@/components/page-header";
 import { RunStatusCard } from "@/components/monitor/RunStatusCard";
 import { useMonitorStream } from "@/components/monitor/useMonitorStream";
@@ -87,15 +88,7 @@ export function RunsView() {
         title="Runs"
         description="run の事実一覧。行クリックで詳細(判断レビュー)へ。"
         actions={
-          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-            <input
-              type="checkbox"
-              className="accent-primary"
-              checked={includeArchived}
-              onChange={(e) => setIncludeArchived(e.target.checked)}
-            />
-            アーカイブ済みも表示
-          </label>
+          <ArchiveToggle checked={includeArchived} onChange={setIncludeArchived} />
         }
       />
 

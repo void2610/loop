@@ -22,7 +22,7 @@ import { EvidencePanel } from "./evidence-panel";
 import { FrontMatter } from "./front-matter";
 import { Summary } from "./summary";
 import { Verifier } from "./verifier";
-import { VerdictBadge } from "./verdict-badge";
+import { VerdictBadge } from "@/components/verdict-badge";
 
 function fmString(fm: { [key: string]: unknown }, key: string): string {
   const v = fm[key];

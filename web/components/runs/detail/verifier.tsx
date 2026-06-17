@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-import { VerdictBadge } from "./verdict-badge";
+import { VerdictBadge } from "@/components/verdict-badge";
 
 type Criterion = { criterion?: string; met?: boolean; evidence?: string };
 

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+import { ArchiveToggle } from "@/components/archive-toggle";
 import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
-import { RepoBadge } from "@/components/tasks/RepoBadge";
+import { RepoBadge } from "@/components/repo-badge";
 import { RunTaskButton } from "@/components/tasks/RunTaskButton";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -91,15 +92,7 @@ export function TaskList() {
       )}
 
       <div className="flex justify-end">
-        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-          <input
-            type="checkbox"
-            className="accent-primary"
-            checked={includeArchived}
-            onChange={(e) => setIncludeArchived(e.target.checked)}
-          />
-          アーカイブ済みも表示
-        </label>
+        <ArchiveToggle checked={includeArchived} onChange={setIncludeArchived} />
       </div>
 
       <div className="surface overflow-hidden">

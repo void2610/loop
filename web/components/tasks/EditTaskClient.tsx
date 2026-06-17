@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
-import { RepoBadge } from "@/components/tasks/RepoBadge";
+import { RepoBadge } from "@/components/repo-badge";
 import { RunTaskButton } from "@/components/tasks/RunTaskButton";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { useMeta } from "@/components/tasks/useMeta";

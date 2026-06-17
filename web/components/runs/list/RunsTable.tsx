@@ -15,8 +15,8 @@ import {
 import { ArchiveRunButton } from "@/components/runs/ArchiveRunButton";
 import type { RunStatus } from "@/components/monitor/normalize";
 
-import { RepoBadge } from "./RepoBadge";
-import { RunVerdictBadge } from "./RunVerdictBadge";
+import { RepoBadge } from "@/components/repo-badge";
+import { VerdictBadge } from "@/components/verdict-badge";
 
 // RunRow は loop.db 行の射影で catch-all キー(cost_usd/turns 等)が unknown 型。
 // 表示整形はフロントの責務(§2.2)。数値以外は空表示にして事実を歪めない。
@@ -76,7 +76,7 @@ export function RunsTable({
               onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}/live`)}
             >
               <TableCell>
-                <RepoBadge repo={r.repo} />
+                <RepoBadge repo={r.repo} mono />
               </TableCell>
               <TableCell className="font-mono text-xs text-foreground/90">{r.run_id}</TableCell>
               <TableCell>
@@ -101,11 +101,11 @@ export function RunsTable({
               onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}`)}
             >
               <TableCell>
-                <RepoBadge repo={r.repo} />
+                <RepoBadge repo={r.repo} mono />
               </TableCell>
               <TableCell className="font-mono text-xs text-foreground/90">{r.run_id}</TableCell>
               <TableCell>
-                <RunVerdictBadge verdict={r.verdict} />
+                <VerdictBadge verdict={r.verdict} emptyDash />
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {r.reviewed ? "✓" : "·"}
