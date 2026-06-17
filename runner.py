@@ -813,7 +813,7 @@ def build_norms_brief(repo: Path | None, cfg: dict) -> str:
     """承認済み規範(conventions.md)を注入する手続き的記憶(種類A)。
     人間が candidates.md から昇格させたものだけ。候補(candidates.md)は絶対に注入しない。
     優先順位は CLAUDE.md(憲法) > これ > 過去 run の事実ブリーフ。"""
-    if repo is None or not cfg.get("loop", {}).get("norms_enabled", True):
+    if repo is None:
         return ""
     conv, _ = norms_paths(repo, cfg)
     if not conv.exists():
@@ -933,7 +933,7 @@ def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> d
     """摩擦 run から規範候補を起草する(read-only・構造化出力)。ファイルは書かない。
     backend(maybe_draft_norms)が candidates.md へ決定論的に追記する(generate_task と同じ分業)。"""
     loop, agents = cfg["loop"], cfg["agents"]
-    model = agents.get("norms_drafter_model") or agents.get("author_model") or agents["implementer_model"]
+    model = agents.get("author_model") or agents["implementer_model"]
     summary = _run_summary_for_norms(run_id, repo)
     prompt = (
         "あなたは loop の『規範候補起草者』です。下の run で観察された**摩擦**(期待とのズレ・差し戻し・判定不能)から、"
@@ -971,10 +971,7 @@ def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> d
 def maybe_draft_norms(run_id: str, repo: Path | None, cfg: dict, trigger: str) -> None:
     """摩擦 run の規範候補を起草し candidates.md へ追記する(種類A)。conventions.md には絶対に書かない。
     空振り・失敗は黙って握り潰さず run のログ(norms.json)と stdout に残す(可観測性)。"""
-    if repo is None or not cfg.get("loop", {}).get("norms_enabled", True):
-        return
-    if not repo.is_dir():  # stale な repo パス(別マシンの run 等)では起草を試みない
-        print(f"  · 規範候補: repo が存在しないため起草をスキップ({repo})")
+    if repo is None or not repo.is_dir():  # repo が無い/stale(別マシンの run 等)なら起草しない
         return
     run_dir = RUNS / run_id
     log = run_dir / "norms.json"
@@ -1235,8 +1232,6 @@ def maybe_draft_on_review(run_id: str, cfg: dict) -> None:
     """トリガー3(人間レビューで verdict が覆った): run MD front-matter の human_verdict が
     runner の verdict と食い違うとき、規範候補を起草する(種類A の起草 / 覆し判断は人間=種類B)。
     human_verdict は人間が nvim で任意に書く構造化シグナル(無ければ何もしない)。"""
-    if not cfg.get("loop", {}).get("norms_enabled", True) or not cfg.get("loop", {}).get("norms_draft_on_friction", True):
-        return
     md = RUNS / f"{run_id}.md"
     if not md.exists():
         return
@@ -1623,7 +1618,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         _finalize_run(task, run_id, run_dir, md, final, f"run: {run_id} → {final}")
 
         # 摩擦のある run でだけ規範候補を起草する(種類A)。毎 run ではない。昇格は人間(種類B)。
-        if not retryable and loop.get("norms_enabled", True) and loop.get("norms_draft_on_friction", True):
+        if not retryable:
             triggers = []
             if revise_occurred:
                 triggers.append("Implementer の revise 差し戻しが発生(required_changes)")
