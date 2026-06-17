@@ -19,6 +19,10 @@ timeout_seconds = 1800
 verifier_attempts = 3
 max_attempts = 2
 
+# Verifier が revise(差し戻し)判定したとき、Implementer を --resume(前文脈保持)で再実装させる往復回数の上限。
+# 0 で差し戻し無効(従来挙動)。上限超過でも pass にせず handoff(検証の死角を作らない)。
+implementer_revise_rounds = 2
+
 # タスクが allowed_tools を指定しなかった場合のフォールバック。
 # -p モードでは未許可ツールは(尋ねられず)拒否されるため、コード探索の Grep/Glob も入れておく。
 default_allowed_tools = ["Read", "Edit", "Write", "Grep", "Glob", "Bash"]

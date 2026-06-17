@@ -58,6 +58,7 @@ def _data_dir() -> Path:
 # データ系のパスは data_dir 配下に置く(エンジン=公開 repo とは別の git repo)。
 DATA = _data_dir()
 TASKS_DIR = DATA / "tasks"   # 1 タスク = 1 ファイル(data/tasks/<id>.md、YAML front-matter)
+PLANS_DIR = TASKS_DIR / "plans"  # Author 生成の詳細実装プラン(契約の body 外サイドカー: data/tasks/plans/<id>.md)
 RUNS = DATA / "runs"
 DB = DATA / "loop.db"
 REVIEW_NOTES = DATA / "review-notes.md"
@@ -166,6 +167,23 @@ def read_task(task_id: str) -> tuple[dict, str] | None:
     return (fm if isinstance(fm, dict) else {}), body
 
 
+def plan_path(task_id: str) -> Path:
+    return PLANS_DIR / f"{task_id}.md"
+
+
+def write_plan(task_id: str, plan: str) -> Path:
+    """Author 生成の実装プランをサイドカーに書く(契約 body は肥らせない)。"""
+    PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    p = plan_path(task_id)
+    p.write_text(plan.strip() + "\n", encoding="utf-8")
+    return p
+
+
+def read_plan(task_id: str) -> str:
+    p = plan_path(task_id)
+    return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+
+
 def write_task(task_id: str, fm: dict, body: str = "") -> Path:
     """front-matter dict と body からタスクファイルを書き出す(フォーム保存)。"""
     TASKS_DIR.mkdir(parents=True, exist_ok=True)
@@ -218,9 +236,33 @@ def render_explorer_prompt(task: dict) -> str:
     return "\n".join(parts)
 
 
-def render_implementer_prompt(task: dict, explorer_findings: str) -> str:
+def render_implementer_prompt(task: dict, context: str, source: str = "Explorer の調査") -> str:
     base = render_prompt(task)
-    return base + f"\n\n# 調査メモ(Explorer による事前調査。参考にしてよいが鵜呑みにしない)\n{explorer_findings}"
+    parts = [base]
+    if context and context.strip():
+        parts.append(f"\n# 事前情報({source}。参考にしてよいが鵜呑みにせず、repo の現状を優先する)\n{context}")
+    verify = task.get("verify")
+    parts.append("\n# 進め方\n実装が終わったら、**必ず自分で関連テスト"
+                 + (f"(`{verify}` を含む)" if verify else "")
+                 + "を実行**し、その出力で受け入れ基準を自己確認してから完了してください。")
+    return "\n".join(parts)
+
+
+def render_revise_prompt(task: dict, verifier_obj: dict | None) -> str:
+    """Verifier の差し戻し(revise)を受けた Implementer への追加指示(--resume で前文脈を保持)。"""
+    obj = verifier_obj or {}
+    reasons = str(obj.get("reasons", "")).strip() or "(理由未記載)"
+    changes = [str(c).strip() for c in (obj.get("required_changes") or []) if str(c).strip()]
+    parts = [
+        "独立した Verifier(別モデル)があなたの実装を監査し、**差し戻し(revise)**と判定しました。",
+        "あなたはこの worktree で実装を続けています。下の指摘に対応し、再度テストを通してから完了してください。",
+        f"\n# 差し戻し理由\n{reasons}",
+    ]
+    if changes:
+        parts.append("\n# 要対応\n" + "\n".join(f"- {c}" for c in changes))
+    if task.get("verify"):
+        parts.append(f"\n# 検証\n修正後、`{task['verify']}` が exit 0 になることを自分で確認してから完了してください。")
+    return "\n".join(parts)
 
 
 def render_verifier_prompt(task: dict, diff_text: str, test_output: str) -> str:
@@ -229,7 +271,12 @@ def render_verifier_prompt(task: dict, diff_text: str, test_output: str) -> str:
     return f"""あなたは独立した受け入れ判定者(Verifier)です。**実装者の自己申告を信じてはいけません。**
 受け入れ基準を 1 つずつ、下の diff と検証出力、および worktree 内の実ファイル(Read/Grep/Glob 可)に照らして検証してください。
 テストを通すためだけの gaming(本質を解かずテストを書き換える等)や、spec の部分的未達を積極的に疑ってください。
+**決定論テスト(verify)自体の妥当性も批判的に監査**してください — テストが本質を検証しておらず空通りしているなら、たとえ exit 0 でも pass にしないこと。
 判定はスキーマに従い構造化出力で返してください。
+- `pass`: 受け入れ基準を満たし、テストも妥当。
+- `fail`: 本質的に達成不能・方向性が誤り(直しても通せない見込み)。
+- `revise`: 実装を直せば通せる見込み。`required_changes` に具体的な修正指示を書く(実装者が同一セッションで対応する)。
+- `handoff`: 自動判定では確証できず人間の判断が要る。
 
 # ゴール
 {task['goal']}
@@ -381,9 +428,11 @@ WRITE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"]
 
 def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
              tools: list[str], run_dir: Path,
-             extra_args: list[str] | None = None, read_only: bool = False) -> tuple[dict | None, str]:
+             extra_args: list[str] | None = None, read_only: bool = False,
+             resume_session: str | None = None) -> tuple[dict | None, str]:
     """役割を1つ headless 実行し {role}.result.json / {role}.stderr.log を保存する。
-    read_only=True は変更系ツールを --disallowedTools で禁止(global settings を上書き)。"""
+    read_only=True は変更系ツールを --disallowedTools で禁止(global settings を上書き)。
+    resume_session 指定時は --resume で同一セッションを継続し前文脈を保持する(差し戻し再実装)。"""
     loop = cfg["loop"]
     cmd = [
         "claude", "-p", prompt,
@@ -394,6 +443,8 @@ def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
         "--permission-mode", loop.get("permission_mode", "default"),
         "--allowedTools", *tools,
     ]
+    if resume_session:
+        cmd += ["--resume", resume_session]
     if read_only:
         cmd += ["--disallowedTools", *WRITE_TOOLS]
     if extra_args:
@@ -456,11 +507,12 @@ def resolve_tools(value, fallback: list[str]) -> list[str]:
 VERIFIER_SCHEMA = {
     "type": "object",
     "properties": {
-        "verdict": {"enum": ["pass", "fail", "handoff"]},
+        "verdict": {"enum": ["pass", "fail", "revise", "handoff"]},
         "criteria": {"type": "array", "items": {"type": "object", "properties": {
             "criterion": {"type": "string"}, "met": {"type": "boolean"},
             "evidence": {"type": "string"}}, "required": ["criterion", "met"]}},
         "test_gaming_suspected": {"type": "boolean"},
+        "required_changes": {"type": "array", "items": {"type": "string"}},  # revise 時の修正指示
         "reasons": {"type": "string"},
         "confidence": {"enum": ["high", "medium", "low"]},
     },
@@ -478,7 +530,7 @@ def parse_verifier(result: dict | None, hint: str, run_dir: Path) -> tuple[str, 
         return "handoff", None
     (run_dir / "verifier.json").write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
     v = obj.get("verdict", "handoff")
-    return (v if v in ("pass", "fail", "handoff") else "handoff"), obj
+    return (v if v in ("pass", "fail", "revise", "handoff") else "handoff"), obj
 
 
 def combine_verdict(test_verdict: str, verifier_verdict: str) -> str:
@@ -487,6 +539,25 @@ def combine_verdict(test_verdict: str, verifier_verdict: str) -> str:
     if verifier_verdict in ("fail", "handoff"):
         return verifier_verdict
     return "pass"
+
+
+def judge_with_verifier(task: dict, wt: Path, run_dir: Path, cfg: dict,
+                        diff_text: str, test_output: str) -> tuple[str, dict | None]:
+    """Verifier(別モデル・read-only・構造化出力)で判定。handoff の間は冪等に再判定する。"""
+    loop, agents = cfg["loop"], cfg["agents"]
+    vmax = int(loop.get("verifier_attempts", 3))
+    verdict, obj = "handoff", None
+    for vatt in range(1, vmax + 1):
+        print(f"  · Verifier {'判定中' if vatt == 1 else f'再判定 {vatt}/{vmax}'} …")
+        v_result, v_hint = run_role(
+            "verifier", render_verifier_prompt(task, diff_text, test_output),
+            wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
+            extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)],
+            read_only=True)
+        verdict, obj = parse_verifier(v_result, v_hint, run_dir)
+        if verdict != "handoff":
+            break
+    return verdict, obj
 
 
 # --- タスク生成(自然言語 → 目標契約。専用 skill + 構造化出力) ---
@@ -503,6 +574,7 @@ TASK_GEN_SCHEMA = {
         "constraints": {"type": "array", "items": {"type": "string"}},
         "allowed_tools": {"type": "string"},
         "max_attempts": {"type": "integer"},
+        "plan": {"type": "string"},  # repo 調査に基づく詳細実装プラン(Explorer 統合。サイドカーに保存)
         "notes": {"type": "string"},
     },
     "required": ["id", "goal", "accept"],
@@ -525,7 +597,9 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
         wrapped += (f"あなたは対象リポジトリ `{repo_path}` の中で **read-only** で実行されています。"
                     "Read/Grep/Glob で実際の構成・テスト/ビルド方法(justfile・package.json・Makefile・テスト位置など)を調べ、"
                     "**その repo で実際に exit 0 になる `verify` コマンド**と、repo の実情に即した具体的な `accept` を書いてください。"
-                    "プレースホルダや当て推量は禁止です。\n\n")
+                    "プレースホルダや当て推量は禁止です。\n"
+                    "さらに、調査結果を踏まえた**詳細な実装プランを `plan` に書いてください**(Explorer の事前調査を兼ねる): "
+                    "変更すべきファイルと具体的な手順、触る関数/箇所、想定リスク、確認方法。実装者がこれを読んで着手できる粒度で。\n\n")
     wrapped += "# 依頼\n" + prompt
     cmd = [
         "claude", "-p", wrapped,
@@ -605,7 +679,12 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int
             else:
                 fm["repo"] = repo
         p = write_task(tid, fm, str(obj.get("notes", "") or ""))
-        auto_commit(DATA, [p], f"todo: {tid} をプロンプトから生成")
+        paths = [p]
+        plan = str(obj.get("plan", "") or "").strip()
+        if plan:  # 詳細プランは body 外のサイドカーへ(契約を肥らせない / Web 編集と独立)
+            paths.append(write_plan(tid, plan))
+            print(f"  · 実装プランを生成: {plan_path(tid).relative_to(DATA)}")
+        auto_commit(DATA, paths, f"todo: {tid} をプロンプトから生成")
         print(f"  · 生成: {tid}")
     finally:
         gen_lock.unlink(missing_ok=True)  # 生成中表示は必ず解除
@@ -906,9 +985,9 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
 # --- コマンド ---
 
 def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[str, bool]:
-    """1 試行(Explorer→Implementer→決定論テスト→Verifier)。(final, retryable) を返す。
-    retryable=True は「実装が timeout/error で確定しなかった」= run 全体を再試行する価値がある状態。
-    Verifier の handoff(判定不能)は read-only のまま内部で再判定する(冪等で安全)。"""
+    """1 試行((Author プラン or Explorer)→Implementer→決定論ゲート→Verifier→revise ループ)。
+    (final, retryable) を返す。retryable=True は「実装が timeout/error で確定しなかった」= run 全体を再試行する価値がある状態。
+    Verifier の handoff は read-only のまま再判定(冪等)。revise は Implementer を --resume で差し戻し(有界)。"""
     loop, agents = cfg["loop"], cfg["agents"]
     run_dir = RUNS / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -936,55 +1015,74 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         wt, branch = add_worktree(repo, run_id)
     repo_label = str(repo) if repo else "none"
     try:
-        # 1) Explorer(read-only、失敗は致命でない)
-        write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
-                         started_at=started_at, phase="explorer")
-        print("  · Explorer 調査中 …")
-        e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
-                               agents["explorer_model"], agents["explorer_tools"], run_dir, read_only=True)
-        explorer_findings = (e_result or {}).get("result") or "(Explorer 出力なし)"
-
-        # 2) Implementer(read-write、ここが本作業)
-        write_run_status(run_id=run_id, phase="implementer")
-        print("  · Implementer 実装中 …")
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
-        i_result, i_hint = run_role("implementer", render_implementer_prompt(task, explorer_findings),
-                                    wt, cfg, agents["implementer_model"], i_tools, run_dir)
-        copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
-        if no_repo:
-            (run_dir / "change.patch").write_text("（no-repo タスク: git diff なし。証拠は test-output と transcript)\n", encoding="utf-8")
-        else:
-            capture_diff(wt, run_dir)
-
         verifier_obj = None
         retryable = False
-        if i_hint == "timeout":
-            final, test_verdict, verifier_verdict, vcode = "timeout", "none", "handoff", None
-            retryable = True
-        elif i_hint == "error":
-            final, test_verdict, verifier_verdict, vcode = "fail", "none", "handoff", None
-            retryable = True
+        test_verdict, verifier_verdict, vcode = "none", "handoff", None
+        final = "fail"
+
+        # 1) 事前情報: Author 生成プランがあれば Explorer を省略(統合)、無ければ Explorer を走らせる。
+        plan = read_plan(task.get("id", ""))
+        if plan:
+            impl_context, impl_source = plan, "Author の実装プラン(repo 調査済み)"
+            print("  · Author の実装プランを使用(Explorer 省略)")
         else:
-            # 3) 決定論テスト(証拠)
-            write_run_status(run_id=run_id, phase="verifier")
-            test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"
-            # 4) Verifier(別モデル、read-only、構造化出力)。handoff の間は再判定(冪等で安全)。
-            vmax = int(loop.get("verifier_attempts", 3))
-            diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
-            tp = run_dir / "test-output.txt"
-            test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
-            verifier_verdict = "handoff"
-            for vatt in range(1, vmax + 1):
-                print(f"  · Verifier {'判定中' if vatt == 1 else f'再判定 {vatt}/{vmax}'} …")
-                v_result, v_hint = run_role(
-                    "verifier", render_verifier_prompt(task, diff_text, test_output),
-                    wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
-                    extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)],
-                    read_only=True)
-                verifier_verdict, verifier_obj = parse_verifier(v_result, v_hint, run_dir)
-                if verifier_verdict != "handoff":
+            write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
+                             started_at=started_at, phase="explorer")
+            print("  · Explorer 調査中 …")
+            e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
+                                   agents["explorer_model"], agents["explorer_tools"], run_dir, read_only=True)
+            impl_context, impl_source = (e_result or {}).get("result") or "(Explorer 出力なし)", "Explorer の調査"
+
+        # 2) Implementer(read-write、自己テストまで)。差し戻し時は同一セッションを --resume で継続。
+        write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
+                         started_at=started_at, phase="implementer")
+        print("  · Implementer 実装中 …")
+        i_result, i_hint = run_role("implementer", render_implementer_prompt(task, impl_context, impl_source),
+                                    wt, cfg, agents["implementer_model"], i_tools, run_dir)
+        session_id = (i_result or {}).get("session_id")
+        copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
+
+        if i_hint == "timeout":
+            final, retryable = "timeout", True
+        elif i_hint == "error":
+            final, retryable = "fail", True
+        else:
+            # 3-5) 決定論ゲート → Verifier 監査 →(revise なら Implementer を --resume で差し戻し)を有界ループ。
+            revise_max = int(loop.get("implementer_revise_rounds", 2))
+            rounds = 0
+            while True:
+                if no_repo:
+                    (run_dir / "change.patch").write_text("（no-repo タスク: git diff なし。証拠は test-output と transcript)\n", encoding="utf-8")
+                else:
+                    capture_diff(wt, run_dir)
+                write_run_status(run_id=run_id, phase="verifier")
+                test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"(床)
+                diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
+                tp = run_dir / "test-output.txt"
+                test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+                verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output)
+                if verifier_obj is not None:  # 各ラウンドの判断を証拠として残す(最終 verifier.json とは別)
+                    (run_dir / f"verifier.round{rounds + 1}.json").write_text(
+                        json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                if verifier_verdict != "revise":
                     break
-            final = combine_verdict(test_verdict, verifier_verdict)
+                if rounds >= revise_max:
+                    print(f"  · 差し戻し上限({revise_max})到達 → handoff(確証できないため人間へ)")
+                    verifier_verdict = "handoff"  # 死角を作らない: 未確証は pass にせず人間へ
+                    break
+                rounds += 1
+                print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})→ Implementer 再実装 …")
+                write_run_status(run_id=run_id, phase="implementer")
+                i_result, i_hint = run_role(
+                    "implementer", render_revise_prompt(task, verifier_obj), wt, cfg,
+                    agents["implementer_model"], i_tools, run_dir, resume_session=session_id)
+                copy_transcript(i_result, run_dir)
+                if i_hint in ("timeout", "error"):
+                    final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+                    break
+            if not retryable:
+                final = combine_verdict(test_verdict, verifier_verdict)
 
         # remove --force の前にコミットして成果を loop/<id> ブランチに残す(repo タスクのみ)。
         committed = commit_worktree(wt, f"loop run {run_id} → {final}") if not no_repo else False
