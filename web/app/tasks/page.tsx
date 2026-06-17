@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { Plus } from "lucide-react";
 
+import { PageHeader } from "@/components/page-header";
 import { TaskList } from "@/components/tasks/TaskList";
 import { Button } from "@/components/ui/button";
 
@@ -10,17 +12,18 @@ export const metadata = { title: "Tasks — loop" };
 export default function TasksPage() {
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">タスク</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            data/tasks/ の目標契約。作成・編集・実行はすべて runner 経由で MD と git に着地する。
-          </p>
-        </div>
-        <Link href="/tasks/new">
-          <Button>＋ 新規</Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Tasks"
+        description="data/tasks/ の目標契約。作成・編集・実行はすべて runner 経由で MD と git に着地する。"
+        actions={
+          <Link href="/tasks/new">
+            <Button>
+              <Plus />
+              新規タスク
+            </Button>
+          </Link>
+        }
+      />
       <Suspense fallback={<p className="text-sm text-muted-foreground">読み込み中…</p>}>
         <TaskList />
       </Suspense>

@@ -12,6 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { ArchiveRunButton } from "@/components/runs/ArchiveRunButton";
+
 import { RepoBadge } from "./RepoBadge";
 import { RunVerdictBadge } from "./RunVerdictBadge";
 
@@ -30,42 +32,44 @@ function formatStarted(v: string | null | undefined): string {
   return (v ?? "").slice(0, 19);
 }
 
-export function RunsTable({ runs }: { runs: RunRow[] }) {
+export function RunsTable({ runs, onChanged }: { runs: RunRow[]; onChanged?: () => void }) {
   const router = useRouter();
 
   if (runs.length === 0) {
     return (
-      <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        該当 run なし
+      <div className="surface flex flex-col items-center gap-1 p-12 text-center">
+        <p className="text-sm font-medium text-foreground">該当する run がありません</p>
+        <p className="text-xs text-muted-foreground">フィルタを変えるか、タスクを実行すると run が記録されます。</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border border-border">
+    <div className="surface overflow-hidden">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>repo</TableHead>
-            <TableHead>run</TableHead>
-            <TableHead>verdict</TableHead>
-            <TableHead>rev</TableHead>
-            <TableHead className="text-right">cost</TableHead>
-            <TableHead className="text-right">turns</TableHead>
-            <TableHead>started</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="th-label">repo</TableHead>
+            <TableHead className="th-label">run</TableHead>
+            <TableHead className="th-label">verdict</TableHead>
+            <TableHead className="th-label">rev</TableHead>
+            <TableHead className="th-label text-right">cost</TableHead>
+            <TableHead className="th-label text-right">turns</TableHead>
+            <TableHead className="th-label">started</TableHead>
+            <TableHead className="th-label text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {runs.map((r) => (
             <TableRow
               key={r.run_id}
-              className="cursor-pointer"
+              className="cursor-pointer transition-colors hover:bg-accent/40"
               onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}`)}
             >
               <TableCell>
                 <RepoBadge repo={r.repo} />
               </TableCell>
-              <TableCell className="font-mono text-xs">{r.run_id}</TableCell>
+              <TableCell className="font-mono text-xs text-foreground/90">{r.run_id}</TableCell>
               <TableCell>
                 <RunVerdictBadge verdict={r.verdict} />
               </TableCell>
@@ -80,6 +84,13 @@ export function RunsTable({ runs }: { runs: RunRow[] }) {
               </TableCell>
               <TableCell className="font-mono text-xs text-muted-foreground">
                 {formatStarted(r.started_at)}
+              </TableCell>
+              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                <ArchiveRunButton
+                  runId={r.run_id}
+                  archived={!!r.archived}
+                  onChanged={() => onChanged?.()}
+                />
               </TableCell>
             </TableRow>
           ))}

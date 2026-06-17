@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Archive, ArchiveRestore } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ApiError, api } from "@/lib/api";
@@ -31,12 +32,22 @@ export function ArchiveTaskButton({
     }
   }
 
+  const label = archived ? "アーカイブ解除" : "アーカイブ";
   return (
-    <span className="inline-flex items-center gap-2">
-      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={toggle}>
-        {archived ? "アーカイブ解除" : "アーカイブ"}
-      </Button>
+    <span className="inline-flex items-center gap-1.5">
       {error && <span className="text-xs text-destructive">{error}</span>}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        disabled={busy}
+        onClick={toggle}
+        title={label}
+        aria-label={label}
+        className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      >
+        {archived ? <ArchiveRestore /> : <Archive />}
+      </Button>
     </span>
   );
 }

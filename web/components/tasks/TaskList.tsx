@@ -97,27 +97,31 @@ export function TaskList() {
         </p>
       )}
 
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={includeArchived}
-          onChange={(e) => {
-            baseline.current = null;
-            setIncludeArchived(e.target.checked);
-          }}
-        />
-        アーカイブ済みも表示
-      </label>
+      <div className="flex justify-end">
+        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+          <input
+            type="checkbox"
+            className="accent-primary"
+            checked={includeArchived}
+            onChange={(e) => {
+              baseline.current = null;
+              setIncludeArchived(e.target.checked);
+            }}
+          />
+          アーカイブ済みも表示
+        </label>
+      </div>
 
+      <div className="surface overflow-hidden">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>repo</TableHead>
-            <TableHead>id</TableHead>
-            <TableHead>status</TableHead>
-            <TableHead>goal</TableHead>
-            <TableHead>最新 run</TableHead>
-            <TableHead className="text-right">操作</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="th-label">repo</TableHead>
+            <TableHead className="th-label">id</TableHead>
+            <TableHead className="th-label">status</TableHead>
+            <TableHead className="th-label">goal</TableHead>
+            <TableHead className="th-label">最新 run</TableHead>
+            <TableHead className="th-label text-right">操作</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -142,12 +146,15 @@ export function TaskList() {
               const lr = t.id ? last[t.id] : undefined;
               const goalFirst = (t.goal ?? "").split("\n")[0];
               return (
-                <TableRow key={t.id}>
+                <TableRow key={t.id} className="transition-colors hover:bg-accent/40">
                   <TableCell>
                     <RepoBadge repo={t.repo} />
                   </TableCell>
                   <TableCell>
-                    <Link href={`/tasks/${encodeURIComponent(t.id)}`} className="underline">
+                    <Link
+                      href={`/tasks/${encodeURIComponent(t.id)}`}
+                      className="font-mono text-xs font-medium text-foreground/90 hover:text-primary hover:underline"
+                    >
                       {t.id}
                     </Link>
                   </TableCell>
@@ -184,6 +191,7 @@ export function TaskList() {
           )}
         </TableBody>
       </Table>
+      </div>
       <p className="text-xs text-muted-foreground">
         実行順はファイル名昇順(先頭の todo が「次」)。「実行」は当該タスクを今すぐ
         background 実行。

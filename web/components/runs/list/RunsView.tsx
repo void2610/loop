@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, api, type RunRow } from "@/lib/api";
 
+import { PageHeader } from "@/components/page-header";
+
 import { RunsFilterBar, type RunsFilter } from "./RunsFilterBar";
 import { RunsTable } from "./RunsTable";
 
@@ -76,13 +78,22 @@ export function RunsView() {
   }, []);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Runs</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          run の事実一覧。行クリックで詳細(判断レビュー)へ。
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Runs"
+        description="run の事実一覧。行クリックで詳細(判断レビュー)へ。"
+        actions={
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <input
+              type="checkbox"
+              className="accent-primary"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.target.checked)}
+            />
+            アーカイブ済みも表示
+          </label>
+        }
+      />
 
       <RunsFilterBar
         filter={filter}
@@ -92,15 +103,6 @@ export function RunsView() {
         onChange={setFilter}
         onDispatch={onDispatch}
       />
-
-      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={includeArchived}
-          onChange={(e) => setIncludeArchived(e.target.checked)}
-        />
-        アーカイブ済みも表示
-      </label>
 
       {notice ? (
         <p className="text-sm text-muted-foreground">{notice}</p>
@@ -114,7 +116,7 @@ export function RunsView() {
           読み込み中…
         </div>
       ) : (
-        <RunsTable runs={runs} />
+        <RunsTable runs={runs} onChanged={() => void load(filter, includeArchived)} />
       )}
     </div>
   );
