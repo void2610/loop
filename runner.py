@@ -509,30 +509,40 @@ TASK_GEN_SCHEMA = {
 }
 
 
-def generate_task(prompt: str, cfg: dict) -> dict | None:
+def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict | None:
     """自然言語の依頼を専用 skill 付きで claude -p に渡し、目標契約を構造化出力で得る。
-    ファイルへの書き込みは行わない(backend が write_task で決定論的に書く)。"""
+    ファイルへの書き込みは行わない(backend が write_task で決定論的に書く)。
+    repo_path 指定時は、その repo 内を cwd にして read-only(Read/Grep/Glob)で実構成を調べさせ、
+    その repo で実際に exit 0 になる verify を書かせる(repo を見ずに当て推量させない)。"""
     agents, loop = cfg["agents"], cfg["loop"]
     model = agents.get("author_model") or agents["implementer_model"]
+    inspect = repo_path is not None and repo_path.is_dir()
     # 「実行せず変換せよ」を明示。これが無いと依頼内容(例: ファイル作成)を実際にやろうとして
-    # read-only 拒否 → リトライで turn を空回りし遅くなる。
-    # 対象リポジトリは UI で明示選択する(モデルには推定させない)。
+    # read-only 拒否 → リトライで turn を空回りし遅くなる。repo 自体は UI 選択(モデルに推定させない)。
     wrapped = ("次の依頼を loop の『目標契約(タスク定義)』に変換し、構造化出力で返してください。"
-               "**ファイルの作成・編集・コマンド実行は一切しないでください。設計だけ**です。\n\n# 依頼\n" + prompt)
+               "**ファイルの作成・編集・コマンド実行は一切しないでください。設計だけ**です。\n\n")
+    if inspect:
+        wrapped += (f"あなたは対象リポジトリ `{repo_path}` の中で **read-only** で実行されています。"
+                    "Read/Grep/Glob で実際の構成・テスト/ビルド方法(justfile・package.json・Makefile・テスト位置など)を調べ、"
+                    "**その repo で実際に exit 0 になる `verify` コマンド**と、repo の実情に即した具体的な `accept` を書いてください。"
+                    "プレースホルダや当て推量は禁止です。\n\n")
+    wrapped += "# 依頼\n" + prompt
     cmd = [
         "claude", "-p", wrapped,
         "--output-format", "json",
         "--model", model,
-        "--max-turns", "8",  # 設計のみ。空回り防止に小さく
+        "--max-turns", "12" if inspect else "8",  # repo 調査ぶん少し増やす。設計のみで空回り防止に小さく
         "--max-budget-usd", str(loop["max_budget_usd"]),
         "--permission-mode", loop.get("permission_mode", "default"),
-        "--disallowedTools", *WRITE_TOOLS,  # 生成は read-only。global settings の Write/Bash を上書き
+        "--allowedTools", "Read", "Grep", "Glob",  # 生成は read-only 調査のみ
+        "--disallowedTools", *WRITE_TOOLS,  # global settings の Write/Bash を上書きして read-only 強制
         "--json-schema", json.dumps(TASK_GEN_SCHEMA, ensure_ascii=False),
     ]
     if TASK_AUTHOR_SKILL.exists():
         cmd += ["--append-system-prompt", TASK_AUTHOR_SKILL.read_text(encoding="utf-8")]
+    cwd = str(repo_path) if inspect else str(ROOT)
     try:
-        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
+        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                               timeout=loop["timeout_seconds"])
         result = json.loads(proc.stdout)
     except (subprocess.TimeoutExpired, json.JSONDecodeError):
@@ -558,7 +568,13 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int
     tid = None
     try:
         print("▶ タスク生成中 …")
-        obj = generate_task(prompt, cfg)
+        # 選択 repo を実パスへ解決して author に read-only 調査させる(repo='default'/none/未指定は調査なし)。
+        repo_path = None
+        if repo and repo != "default":
+            repo_path = resolve_repo({"repo": repo}, cfg)
+        if repo_path is not None:
+            print(f"  · repo を調査(read-only): {repo_path}")
+        obj = generate_task(prompt, cfg, repo_path)
         if not isinstance(obj, dict) or not obj.get("id") or not obj.get("goal"):
             print("生成に失敗しました(モデル出力が不正)。")
             return 1
