@@ -27,14 +27,17 @@ function verdictVariant(v: string | null | undefined): VerdictVariant {
 
 export function TaskList() {
   // 生成直後(GenerateForm から ?generating=1 で遷移)はポーリングして新タスク出現を待つ。
+  // genActive は useState で初期化せず searchParams から毎レンダー導出する
+  // (静的ページの hydration 時に useSearchParams が未取得=false を掴む罠を避ける)。
   const generating = useSearchParams().get("generating") === "1";
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [last, setLast] = useState<Record<string, LastRun>>({});
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [genActive, setGenActive] = useState(generating);
+  const [done, setDone] = useState(false); // 新タスク出現 or 安全弁で生成中表示を終える
   const baseline = useRef<number | null>(null); // 初回件数。件数増 = 新タスク出現
+  const genActive = generating && !done;
 
   const load = useCallback(async () => {
     try {
@@ -44,7 +47,7 @@ export function TaskList() {
       setRunning(res.running);
       setError(null);
       if (baseline.current === null) baseline.current = res.tasks.length;
-      else if (res.tasks.length > baseline.current) setGenActive(false);
+      else if (res.tasks.length > baseline.current) setDone(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "タスク一覧の取得に失敗しました");
     } finally {
@@ -56,11 +59,11 @@ export function TaskList() {
     void load();
   }, [load]);
 
-  // 生成中は 3s ごとにポーリング。安全弁として最大 90s で打ち切る(生成は通常数十秒)。
+  // 生成中は 3s ごとにポーリング。安全弁として最大 120s で打ち切る(生成は通常数十秒)。
   useEffect(() => {
     if (!genActive) return;
     const iv = setInterval(() => void load(), 3000);
-    const to = setTimeout(() => setGenActive(false), 90000);
+    const to = setTimeout(() => setDone(true), 120000);
     return () => {
       clearInterval(iv);
       clearTimeout(to);
@@ -105,7 +108,17 @@ export function TaskList() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tasks.length === 0 ? (
+          {genActive && (
+            <TableRow className="bg-primary/5">
+              <TableCell>
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary align-middle" />
+              </TableCell>
+              <TableCell colSpan={5} className="text-primary">
+                ⏳ 生成中 … Claude Code が目標契約を設計しています(数十秒)。完了すると行が確定します。
+              </TableCell>
+            </TableRow>
+          )}
+          {tasks.length === 0 && !genActive ? (
             <TableRow>
               <TableCell colSpan={6} className="text-muted-foreground">
                 タスクがありません。「＋ 新規」で追加してください。
