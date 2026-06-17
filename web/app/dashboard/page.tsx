@@ -9,6 +9,7 @@
  */
 import Link from "next/link";
 
+import { PageHeader } from "@/components/page-header";
 import {
   Card,
   CardContent,
@@ -94,15 +95,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            集計の事実提示(read-only)。評価・推奨はしない。判断は run 詳細で人間が行う。
-          </p>
-        </div>
-        <RefreshButton />
-      </div>
+      <PageHeader
+        title="Dashboard"
+        description="集計の事実提示(read-only)。評価・推奨はしない。判断は run 詳細で人間が行う。"
+        actions={<RefreshButton />}
+      />
 
       <p className="text-xs text-muted-foreground">
         データ源: {sourceNote}

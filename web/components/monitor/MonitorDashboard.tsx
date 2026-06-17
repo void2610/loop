@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { repoLabel } from "@/lib/repoLabel";
 import type { RunRow } from "@/lib/api";
@@ -46,24 +47,22 @@ export function MonitorDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Monitor</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            進行中 run のライブ監視(SSE)。事実の表示のみ — 判断・要約は生成しない。
-          </p>
-        </div>
-        <Badge variant="outline" className="gap-1.5">
-          <span
-            className={
-              connected
-                ? "h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500"
-                : "h-1.5 w-1.5 rounded-full bg-muted-foreground"
-            }
-          />
-          {connected ? "ストリーム接続中" : "未接続"}
-        </Badge>
-      </div>
+      <PageHeader
+        title="Monitor"
+        description="進行中 run のライブ監視(SSE)。事実の表示のみ — 判断・要約は生成しない。"
+        actions={
+          <Badge variant="outline" className="gap-1.5">
+            <span
+              className={
+                connected
+                  ? "h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500"
+                  : "h-1.5 w-1.5 rounded-full bg-muted-foreground"
+              }
+            />
+            {connected ? "ストリーム接続中" : "未接続"}
+          </Badge>
+        }
+      />
 
       {error ? (
         <Card>

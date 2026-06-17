@@ -5,9 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { api, ApiError, type RunDetail } from "@/lib/api";
+import { MessageSquareText } from "lucide-react";
+
 import { repoLabel } from "@/lib/repoLabel";
 import { ArchiveRunButton } from "@/components/runs/ArchiveRunButton";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 
 import {
   JudgmentForm,
@@ -174,13 +177,20 @@ export function RunDetailView({ runId }: { runId: string }) {
             未レビュー
           </Badge>
         )}
-        <span className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Link
+            href={`/runs/${encodeURIComponent(detail.run_id)}/transcript`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <MessageSquareText />
+            transcript
+          </Link>
           <ArchiveRunButton
             runId={detail.run_id}
             archived={!!fm.archived && fm.archived !== "false"}
             onChanged={() => setReloadKey((k) => k + 1)}
           />
-        </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
