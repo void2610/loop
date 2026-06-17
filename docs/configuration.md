@@ -22,15 +22,20 @@ explorer_tools    = ["Read","Grep","Glob"]
 implementer_tools = ["Read","Edit","Write","Bash","Grep","Glob"]
 verifier_tools    = ["Read","Grep","Glob"]
 
-[repo]
-path = "."                           # タスクが repo 未指定のときのデフォルト対象
-
-[repos]                              # 複数リポジトリのレジストリ(任意)
-# melchior = "/Users/me/Documents/GitHub/melchior"
-# kalmia   = "~/work/kalmia"
-
 [data]
 dir = "data"                         # 契約データの置き場(別 private git repo)
+```
+
+> **リポジトリ構成([repo] デフォルト対象 / [repos] レジストリ)は loop.toml に書かない。**
+> マシン固有なので gitignore された `loop.local.toml` に置き、`load_config` がマージする
+> (`loop.local.toml.example` 参照)。未指定時の対象 repo は `"."`(loop 自身)にフォールバック。
+
+```toml
+# loop.local.toml(gitignore)
+[repos]
+myproject = "/Users/me/Documents/GitHub/myproject"
+[repo]                               # 任意。既定対象。未設定なら "."
+path = "myproject"
 ```
 
 > 起動時に `verifier_model == implementer_model` だと警告(記事の Sub-agents の意図が無効化されるため)。

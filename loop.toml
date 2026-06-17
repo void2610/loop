@@ -44,16 +44,9 @@ explorer_tools    = ["Read", "Grep", "Glob"]
 implementer_tools = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]  # task 側で上書き可
 verifier_tools    = ["Read", "Grep", "Glob"]
 
-[repo]
-# タスクが repo を指定しなかったときのデフォルト対象。"." はこの loop ディレクトリ自身。
-path = "."
-
-[repos]
-# 複数リポジトリのレジストリ(任意)。タスクの repo: にここの「名前」を書ける(パス直書きも可)。
-# repo: none を指定したタスクは git なしの一時ディレクトリで実行される(外部FS作業など)。
-# 例:
-# melchior = "/Users/shuya.izumi/Documents/GitHub/melchior"
-# kalmia   = "~/work/kalmia"
+# リポジトリ構成([repo] デフォルト対象 / [repos] レジストリ)は **このファイルに置かない**。
+# マシン固有なので gitignore された loop.local.toml に書く(load_config がマージ)。
+# loop.local.toml.example を参照。未指定時、対象 repo は "."(この loop ディレクトリ)にフォールバックする。
 
 [data]
 # 契約データ(TODO.md / runs/ / review-notes.md / loop.db)の置き場。

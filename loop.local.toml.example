@@ -1,0 +1,12 @@
+# これを loop.local.toml にコピーして編集する(loop.local.toml は gitignore)。
+# load_config が loop.toml にマージする。リポジトリ構成はすべてここ(ローカル)に置く。
+
+# [repos] にこのマシンの git リポジトリを登録する。タスクの repo: に「名前」を書くと解決され、
+# Web の repo セレクタにも並ぶ。
+[repos]
+# myproject = "/Users/me/Documents/GitHub/myproject"
+# infra     = "~/work/infra"
+
+# (任意)タスクが repo を指定しなかったときのデフォルト対象。未設定なら "."(loop 自身)。
+# [repo]
+# path = "myproject"

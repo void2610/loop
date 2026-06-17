@@ -35,7 +35,14 @@ CONFIG = ROOT / "loop.toml"
 
 def load_config() -> dict:
     with CONFIG.open("rb") as f:
-        return tomllib.load(f)
+        cfg = tomllib.load(f)
+    # マシン固有の上書き(gitignore)。[repos] の実パス等を公開 repo に晒さないための層。
+    local = CONFIG.parent / "loop.local.toml"
+    if local.exists():
+        with local.open("rb") as f:
+            for k, v in tomllib.load(f).items():
+                cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) else v
+    return cfg
 
 
 def _data_dir() -> Path:
