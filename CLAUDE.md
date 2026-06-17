@@ -48,8 +48,8 @@ data/(別 private repo / engine からは .gitignore):
   tasks/<id>.md  tasks/plans/<id>.md(Author 生成の実装プラン)  runs/<id>.md + runs/<id>/  review-notes.md  plans/(設計メモ)  loop.db
 ```
 
-> **run の役割フロー(現行)**: `(Author プラン or Explorer)→ Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise なら Implementer を `--resume` で差し戻し)`。
-> - **Author = Explorer 統合**: 生成時に repo を read-only 調査し詳細プランを `tasks/plans/<id>.md` に出力。プランがある run は Explorer を省略(手動タスク等プラン無しは従来どおり Explorer)。
+> **run の役割フロー(現行)**: `Author プラン → Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise なら Implementer を `--resume` で差し戻し)`。
+> - **Author = Explorer 統合**: 生成時に repo を read-only 調査し詳細プランを `tasks/plans/<id>.md` に出力。run 時はこのプランを Implementer に渡す(run 時 Explorer は廃止。プラン無しの手動タスクはプラン無しで Implementer 直行)。repo は常に在る前提(no-repo 分岐は撤去)。
 > - **revise ループ**: Verifier は `pass/fail/revise/handoff`。`revise` は `required_changes` を付けて Implementer に差し戻し、**同一セッションを `--resume` で継続**(前文脈保持)。回数上限 `loop.implementer_revise_rounds`(既定 2)。上限超過でも pass にせず handoff(死角を作らない)。決定論ゲートは床のまま(`test=fail → fail`、空通りテストは Verifier が revise/handoff)。
 
 ---

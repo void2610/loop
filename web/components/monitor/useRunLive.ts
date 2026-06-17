@@ -5,7 +5,6 @@ import * as React from "react";
 import { subscribeRun, type RunStreamEventData } from "@/lib/sse";
 
 export const ROLES = [
-  { key: "explorer", label: "Explorer" },
   { key: "implementer", label: "Implementer" },
   { key: "verifier", label: "Verifier" },
 ] as const;
@@ -28,7 +27,6 @@ export type RunLiveState = {
 };
 
 const EMPTY_BY_ROLE = (): Record<RoleKey, RunStreamEventData[]> => ({
-  explorer: [],
   implementer: [],
   verifier: [],
 });

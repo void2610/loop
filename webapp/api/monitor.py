@@ -21,8 +21,8 @@ from ._deps import valid_run_id
 
 router = APIRouter(tags=["monitor"])
 
-_PHASES = [["explorer", "Explorer"], ["implementer", "Implementer"], ["verifier", "検証/Verifier"]]
-_ROLES = ("explorer", "implementer", "verifier")
+_PHASES = [["implementer", "Implementer"], ["verifier", "検証/Verifier"]]
+_ROLES = ("implementer", "verifier")
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
 
 
@@ -54,7 +54,7 @@ def run_live(run_id: str = Depends(valid_run_id)):
     status = util.read_run_status(run_id)
     active = status is not None
     roles = []
-    for key, label in (("explorer", "Explorer"), ("implementer", "Implementer"), ("verifier", "Verifier")):
+    for key, label in (("implementer", "Implementer"), ("verifier", "Verifier")):
         sp = rd / f"{key}.stream.jsonl"
         if sp.exists() and sp.stat().st_size > 0:
             roles.append(schemas.LiveRole(label=label, events=util.parse_transcript(sp)))

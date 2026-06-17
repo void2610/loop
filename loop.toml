@@ -36,15 +36,14 @@ permission_mode = "default"
 max_concurrency = 1
 
 [agents]
-# Sub-agents 3役。Verifier は Implementer と必ず別モデルにすること(記事の Sub-agents の肝)。
+# Sub-agents。Verifier は Implementer と必ず別モデルにすること(記事の Sub-agents の肝)。
 # 書いた本人は自分に高得点をつけるため、独立した別モデルが受け入れ基準を再判定する。
-explorer_model    = "claude-haiku-4-5-20251001"   # 高速・調査(read-only)
-implementer_model = "claude-sonnet-4-6"           # 主力(従来の maker)
+# Author が生成時に repo を調査し詳細プランまで書く(旧 Explorer を統合)。run 時の Explorer は廃止。
+implementer_model = "claude-sonnet-4-6"           # 主力(従来の maker)。差し戻し時は --resume で継続
 verifier_model    = "claude-opus-4-8"             # 別モデル必須(implementer と異なること)
-author_model      = "claude-sonnet-4-6"           # 自然言語→目標契約の生成(Web の「新規作成」)
+author_model      = "claude-sonnet-4-6"           # 自然言語→目標契約+実装プランの生成
 
-# 役割ごとの allowed_tools。Explorer/Verifier は read-only を厳守(判定者は直さない)。
-explorer_tools    = ["Read", "Grep", "Glob"]
+# 役割ごとの allowed_tools。Verifier は read-only を厳守(判定者は直さない)。
 implementer_tools = ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]  # task 側で上書き可
 verifier_tools    = ["Read", "Grep", "Glob"]
 

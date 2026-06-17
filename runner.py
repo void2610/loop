@@ -223,20 +223,7 @@ def render_prompt(task: dict) -> str:
     return "\n".join(parts)
 
 
-def render_explorer_prompt(task: dict) -> str:
-    parts = [
-        "あなたは隔離された git worktree 内の Explorer です。**実装はしないでください**。",
-        "次のゴールについて、関連ファイル・前提・リスク・推奨アプローチを箇条書きで簡潔に報告してください。",
-        f"\n# ゴール\n{task['goal']}",
-    ]
-    if task.get("accept"):
-        parts.append("\n# 受け入れ基準\n" + "\n".join(f"- {a}" for a in task["accept"]))
-    if task.get("constraints"):
-        parts.append("\n# 制約\n" + "\n".join(f"- {c}" for c in task["constraints"]))
-    return "\n".join(parts)
-
-
-def render_implementer_prompt(task: dict, context: str, source: str = "Explorer の調査") -> str:
+def render_implementer_prompt(task: dict, context: str, source: str = "Author の実装プラン") -> str:
     base = render_prompt(task)
     parts = [base]
     if context and context.strip():
@@ -577,7 +564,7 @@ TASK_GEN_SCHEMA = {
         "plan": {"type": "string"},  # repo 調査に基づく詳細実装プラン(Explorer 統合。サイドカーに保存)
         "notes": {"type": "string"},
     },
-    "required": ["id", "goal", "accept"],
+    "required": ["id", "goal", "accept", "plan"],
 }
 
 
@@ -772,7 +759,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
 
     # 役割別実行テーブル(model は result.json の modelUsage キーから取る)
     role_rows = []
-    for r, label in (("explorer", "Explorer"), ("implementer", "Implementer"), ("verifier", "Verifier")):
+    for r, label in (("implementer", "Implementer"), ("verifier", "Verifier")):
         d = roles.get(r)
         if d:
             model = next(iter(d.get("modelUsage") or {}), "")
@@ -985,7 +972,7 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
 # --- コマンド ---
 
 def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[str, bool]:
-    """1 試行((Author プラン or Explorer)→Implementer→決定論ゲート→Verifier→revise ループ)。
+    """1 試行(Author プラン → Implementer → 決定論ゲート → Verifier → revise ループ)。
     (final, retryable) を返す。retryable=True は「実装が timeout/error で確定しなかった」= run 全体を再試行する価値がある状態。
     Verifier の handoff は read-only のまま再判定(冪等)。revise は Implementer を --resume で差し戻し(有界)。"""
     loop, agents = cfg["loop"], cfg["agents"]
@@ -993,13 +980,12 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
     run_dir.mkdir(parents=True, exist_ok=True)
 
     repo = resolve_repo(task, cfg)
-    no_repo = repo is None
-    if not no_repo and not is_git_repo(repo):
+    if not is_git_repo(repo):
         (run_dir / "test-output.txt").write_text(f"NG: repo が git リポジトリではありません: {repo}\n", encoding="utf-8")
         write_run_status(run_id=run_id, task=task["id"], repo=str(repo),
                          started_at=started_at, phase="verifier", verdict=None)
         md = write_run_md(task, run_id, "fail", None, cfg, started_at, None,
-                          "none", "handoff", None, {}, repo=None)
+                          "none", "handoff", None, {}, repo=repo)
         with _DATA_COMMIT_LOCK:  # 完了処理(task status / loop.db / commit)を一括で直列化(§4.3)
             update_status(task["id"], "fail")
             conn = loopdb.connect(DB); loopdb.upsert_md(conn, md); conn.close()
@@ -1008,12 +994,8 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         print(f"  · repo が不正: {repo} → fail")
         return "fail", False
 
-    if no_repo:  # どのリポジトリにも属さないタスク: git なしの一時作業ディレクトリ
-        wt, branch = WORKTREES_DIR / run_id, None
-        wt.mkdir(parents=True, exist_ok=True)
-    else:
-        wt, branch = add_worktree(repo, run_id)
-    repo_label = str(repo) if repo else "none"
+    wt, branch = add_worktree(repo, run_id)
+    repo_label = str(repo)
     try:
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
         verifier_obj = None
@@ -1021,25 +1003,16 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         test_verdict, verifier_verdict, vcode = "none", "handoff", None
         final = "fail"
 
-        # 1) 事前情報: Author 生成プランがあれば Explorer を省略(統合)、無ければ Explorer を走らせる。
-        plan = read_plan(task.get("id", ""))
-        if plan:
-            impl_context, impl_source = plan, "Author の実装プラン(repo 調査済み)"
-            print("  · Author の実装プランを使用(Explorer 省略)")
-        else:
-            write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
-                             started_at=started_at, phase="explorer")
-            print("  · Explorer 調査中 …")
-            e_result, _ = run_role("explorer", render_explorer_prompt(task), wt, cfg,
-                                   agents["explorer_model"], agents["explorer_tools"], run_dir, read_only=True)
-            impl_context, impl_source = (e_result or {}).get("result") or "(Explorer 出力なし)", "Explorer の調査"
+        # 1) 事前情報: Author 生成の実装プラン(生成時に repo を read-only 調査済み。Explorer を統合)。
+        impl_context = read_plan(task.get("id", ""))
 
         # 2) Implementer(read-write、自己テストまで)。差し戻し時は同一セッションを --resume で継続。
         write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
                          started_at=started_at, phase="implementer")
         print("  · Implementer 実装中 …")
-        i_result, i_hint = run_role("implementer", render_implementer_prompt(task, impl_context, impl_source),
-                                    wt, cfg, agents["implementer_model"], i_tools, run_dir)
+        i_result, i_hint = run_role(
+            "implementer", render_implementer_prompt(task, impl_context, "Author の実装プラン(repo 調査済み)"),
+            wt, cfg, agents["implementer_model"], i_tools, run_dir)
         session_id = (i_result or {}).get("session_id")
         copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
 
@@ -1052,10 +1025,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             revise_max = int(loop.get("implementer_revise_rounds", 2))
             rounds = 0
             while True:
-                if no_repo:
-                    (run_dir / "change.patch").write_text("（no-repo タスク: git diff なし。証拠は test-output と transcript)\n", encoding="utf-8")
-                else:
-                    capture_diff(wt, run_dir)
+                capture_diff(wt, run_dir)
                 write_run_status(run_id=run_id, phase="verifier")
                 test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"(床)
                 diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
@@ -1084,11 +1054,11 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             if not retryable:
                 final = combine_verdict(test_verdict, verifier_verdict)
 
-        # remove --force の前にコミットして成果を loop/<id> ブランチに残す(repo タスクのみ)。
-        committed = commit_worktree(wt, f"loop run {run_id} → {final}") if not no_repo else False
+        # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
+        committed = commit_worktree(wt, f"loop run {run_id} → {final}")
 
         roles = {}
-        for r in ("explorer", "implementer", "verifier"):
+        for r in ("implementer", "verifier"):
             p = run_dir / f"{r}.result.json"
             roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
@@ -1104,18 +1074,12 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             auto_commit(DATA, [md, run_dir, task.get("_path")], f"run: {run_id} → {final}")
 
         print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
-        if no_repo:
-            print(f"  · run MD: {md.relative_to(DATA)}(no-repo)")
-        else:
-            branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
-            print(f"  · run MD: {md.relative_to(DATA)} / {branch_note}")
+        branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
+        print(f"  · run MD: {md.relative_to(DATA)} / {branch_note}")
         return final, retryable
     finally:
         clear_run_status(run_id, locals().get("final"))  # status.json を done 化(.run.lock ミラーも掃除)
-        if no_repo:
-            shutil.rmtree(wt, ignore_errors=True)
-        else:
-            remove_worktree(repo, wt)
+        remove_worktree(repo, wt)
 
 
 def _run_task_to_completion(task: dict, cfg: dict) -> str:

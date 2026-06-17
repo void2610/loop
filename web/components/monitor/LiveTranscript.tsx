@@ -17,7 +17,7 @@ export function LiveTranscript({ runId, token }: { runId: string; token?: string
 
   // phase が来たらそのロールへ追従(ユーザーが手動選択した後も最新へ寄せる)。
   React.useEffect(() => {
-    if (phase === "explorer" || phase === "implementer" || phase === "verifier") {
+    if (phase === "implementer" || phase === "verifier") {
       setActive(phase);
     }
   }, [phase]);
