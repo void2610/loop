@@ -23,10 +23,14 @@ copilot_timeout_seconds = 600        # Copilot レビュー投稿待ちタイム
 
 repo_history_runs = 8                # 同一 repo の過去 run の事実を各役へ渡す件数(0=無効。人間の判断は渡さない)
 
+norms_enabled = true                 # 承認済み規範(repo/<name>/conventions.md)を各役へ注入(優先順位 CLAUDE.md > 規範 > 事実)
+norms_draft_on_friction = true       # 摩擦 run(revise/handoff/覆し)で規範候補を自動起草(昇格は人間: runner.py norms)
+
 [agents]                             # Sub-agents + 生成。Verifier は implementer と別モデル必須
 implementer_model = "claude-sonnet-4-6"   # 主力。差し戻し時は --resume で継続
 verifier_model    = "claude-opus-4-8"     # 別モデル必須
 author_model      = "claude-sonnet-4-6"   # プロンプト→目標契約 + 実装プランの生成(旧 Explorer を統合)
+# norms_drafter_model =                   # 規範候補の起草モデル(省略時 author_model)
 implementer_tools = ["Read","Edit","Write","Bash","Grep","Glob"]
 verifier_tools    = ["Read","Grep","Glob"]
 

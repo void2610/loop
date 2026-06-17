@@ -31,6 +31,8 @@ verdict の妥当性・信用度・学びは人間が空欄に書く。
 |---|---|---|
 | `data/tasks/*.md` | 目標契約(入力) | 人間が書く / プロンプト生成 |
 | `runs/<id>.md` + `runs/<id>/` | run 記録と証拠(真実の源) | runner が書く |
+| `repo/<name>/conventions.md` | 承認済みの設計規範(run に注入される) | 人間が昇格時に確定 |
+| `repo/<name>/candidates.md` | 規範候補の控え室(注入されない) | runner が起草 / 人間が裁定 |
 | `review-notes.md` | 種類B の R&D ログ | 人間が書く |
 | `loop.db`(SQLite) | 派生インデックス | `just reindex` で MD から完全再生成 |
 | DuckDB | 分析レンズ(状態なし) | — |
@@ -47,7 +49,25 @@ verdict の妥当性・信用度・学びは人間が空欄に書く。
 | **Skills** | `.claude/skills/`(SKILL.md / task-author)。runner は skill_sha を run に記録 |
 | **Sub-agents** | Author(プラン)→ Implementer → Verifier の分離。Verifier は別モデル必須。revise は Implementer を `--resume` で差し戻し |
 | **Connectors** | ローカル FS / git / shell。証拠はローカルテスト実行から。promote 時は GitHub(PR / CI / Copilot レビュー) |
-| **Memory** | `runs/*.md` + 証拠 + `review-notes.md` + SKILL.md(=契約)。SQLite/DuckDB はその派生。**過去 run の客観的事実(同一 repo で通った検証コマンド・直近 verdict・失敗事実)を Author/Implementer/Verifier に自動注入**(種類A)し、回すほど repo に習熟する。**人間の判断(学び/review-notes)はエージェントに渡さない**=メタループ(人間が skill/ゲート/契約を改善する燃料) |
+| **Memory** | `runs/*.md` + 証拠 + `review-notes.md` + SKILL.md(=契約)。SQLite/DuckDB はその派生。記憶は2系統: ①**事実記憶**(同一 repo で通った検証コマンド・直近 verdict・失敗事実)を Author/Implementer/Verifier に自動注入(種類A)し、回すほど repo に習熟する。②**手続き的記憶=規範**(`conventions.md`。下記参照)。どちらも**人間の判断(学び/review-notes)はエージェントに渡さない**=メタループ(人間が skill/ゲート/契約を改善する燃料) |
+
+## 規範記憶(手続き的記憶)— 事実記憶とは別系統
+
+事実記憶(検証コマンド・失敗シグネチャ)は exit code で測れる客観的事実で、優秀なモデルなら数ターンで自己解決する運用上の失敗が多い。それとは別に、**「このリポジトリではどう振る舞うべきか」という規範**(設計・思想・振る舞い)を育てる層を持つ。例:「新機能はインターフェース境界を先に定義してから実装する」「DI 登録は Installer に集約し各クラスで `new` しない」。これらは exit code では検証できないため、**エージェントに確定させず、人間が承認したものだけを注入する**。
+
+規範は repo 単位で 3 層に分離する(`data/repo/<name>/`):
+
+- `conventions.md` — **承認済みの規範**。これだけが run に注入される。人間が昇格させたものだけ。
+- `candidates.md` — **昇格待ちの控え室**。注入されない。エージェントが起草し、人間が裁定する。これが種類A/種類Bの分離線。
+- `CLAUDE.md`(`data/` 直下)— 人間が書く憲法。最優先・エージェント不可侵。
+
+フロー(種類A → 種類B → 注入):
+
+1. **起草(種類A・自動)**: **摩擦のある run**(Implementer の revise 差し戻し / Verifier の handoff / 人間レビューで verdict が覆る)でだけ、起草エージェント(read-only・構造化出力・確定権なし)が構造化サマリ+diff+差し戻し理由から規範候補を起草し、`candidates.md` へ追記する(毎 run ではない。空振りは run の `norms.json` に残す)。人間の `review-notes.md` は入力にしない(種類B 侵食を防ぐ)。
+2. **昇格(種類B・人間。絶対に自動化しない)**: `uv run runner.py norms` で pending 候補を一覧し、`promote <id>` / `reject <id>` で裁定する。promote は候補の規範文を `conventions.md` へ着地させ、**統合・上書き・文言調整・剪定は人間が** `$EDITOR` で行う(`tui.py` の nvim 着地と同型)。CLI/GUI は規範文を自動生成・要約・推奨しない。
+3. **注入(種類A・自動)**: 以降の run 開始時に `conventions.md`(承認済みのみ)を Author/Implementer/Verifier へ事実ブリーフとは**別セクション**で注入する。`candidates.md` は注入しない。
+
+**優先順位は `CLAUDE.md`(憲法) > `conventions.md`(承認済み規範) > 過去 run の事実ブリーフ**。注入文の冒頭に明示する。`loop.db` の `norm_candidates` は派生インデックスで、`just reindex` が MD から完全再生成する(SQLite は authoritative にしない)。`loop.toml [loop]` の `norms_enabled` / `norms_draft_on_friction` で制御する。
 
 ## 公開エンジン / 非公開データ
 

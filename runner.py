@@ -592,7 +592,8 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
                     "プレースホルダや当て推量は禁止です。\n"
                     "さらに、調査結果を踏まえた**詳細な実装プランを `plan` に書いてください**(Explorer の事前調査を兼ねる): "
                     "変更すべきファイルと具体的な手順、触る関数/箇所、想定リスク、確認方法。実装者がこれを読んで着手できる粒度で。\n\n")
-        wrapped += build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))  # 過去 run の事実(検証済みコマンド等)
+        # 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は CLAUDE.md > 規範 > 事実。
+        wrapped += build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
     wrapped += "\n# 依頼\n" + prompt
     cmd = [
         "claude", "-p", wrapped,
@@ -772,6 +773,273 @@ def build_repo_brief(repo: Path | None, limit: int = 8) -> str:
         return ""
     return ("\n\n# この repo の過去 run からの事実(参考。現状の repo を優先し鵜呑みにしない。人間の判断は含まない)\n"
             + "\n\n".join(parts))
+
+
+# --- 規範記憶(手続き的記憶。事実ブリーフとは別系統。種類A の注入 + 起草 / 昇格は人間=種類B) ---
+# 構造: data/repo/<name>/conventions.md(承認済み・注入される) + candidates.md(候補・注入されない控え室)。
+# 真実は MD。loop.db の norm_candidates は派生(reindex で完全再生成)。
+
+NORMS_ROOT = DATA / "repo"
+
+
+def _safe_repo_name(raw: str) -> str:
+    s = re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "")).strip("-.")
+    return s or "repo"
+
+
+def repo_norm_name(repo: Path, cfg: dict) -> str:
+    """規範を格納する repo 名。[repos] レジストリに同一パスがあればその登録名を、無ければ basename を使う
+    (既存のタスク repo 解決と整合させ、規範を repo 単位で分離する)。"""
+    target = repo.resolve()
+    for name, path in (cfg.get("repos", {}) or {}).items():
+        p = Path(str(path)).expanduser()
+        if not p.is_absolute():
+            p = ROOT / p
+        try:
+            if p.resolve() == target:
+                return _safe_repo_name(name)
+        except OSError:
+            continue
+    return _safe_repo_name(repo.name)
+
+
+def norms_paths(repo: Path, cfg: dict) -> tuple[Path, Path]:
+    """(conventions.md, candidates.md) のパスを返す。"""
+    d = NORMS_ROOT / repo_norm_name(repo, cfg)
+    return d / "conventions.md", d / "candidates.md"
+
+
+def build_norms_brief(repo: Path | None, cfg: dict) -> str:
+    """承認済み規範(conventions.md)を注入する手続き的記憶(種類A)。
+    人間が candidates.md から昇格させたものだけ。候補(candidates.md)は絶対に注入しない。
+    優先順位は CLAUDE.md(憲法) > これ > 過去 run の事実ブリーフ。"""
+    if repo is None or not cfg.get("loop", {}).get("norms_enabled", True):
+        return ""
+    conv, _ = norms_paths(repo, cfg)
+    if not conv.exists():
+        return ""
+    text = conv.read_text(encoding="utf-8", errors="replace").strip()
+    if not text:
+        return ""
+    return ("\n\n# このリポジトリの設計規範(人間が承認済み)\n"
+            "これは人間が承認した手続き的記憶です。リポジトリの CLAUDE.md(憲法)には劣後しますが、"
+            "下の『過去 run からの事実』よりは優先してください。"
+            "(優先順位: CLAUDE.md > この規範 > 過去 run の事実)\n\n" + text)
+
+
+# --- 規範候補(candidates.md)の読み書き。MD が真実、loop.db は派生 ---
+
+def _norm_oneline(s: str) -> str:
+    """候補フィールドを単一行に畳む(`- key: value` 形式を壊さない)。"""
+    return " ".join(str(s or "").split()).strip()
+
+
+def parse_candidates(path: Path) -> list[dict]:
+    """candidates.md を候補ブロック(## candidate-...)の配列に分解する。"""
+    if not path.exists():
+        return []
+    out: list[dict] = []
+    cur: dict | None = None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("## candidate-"):
+            if cur is not None:
+                out.append(cur)
+            cur = {"candidate_id": line[3:].strip(), "evidence_runs": [], "status": "pending"}
+        elif cur is not None and line.lstrip().startswith("- ") and ":" in line:
+            k, v = line.lstrip()[2:].split(":", 1)
+            k, v = k.strip(), v.strip()
+            if k == "evidence_runs":
+                cur[k] = [x.strip() for x in v.strip("[]").split(",") if x.strip()]
+            elif k in ("observed_friction", "proposed_norm", "status", "drafted_at"):
+                cur[k] = v
+    if cur is not None:
+        out.append(cur)
+    return out
+
+
+def _render_candidate(cid: str, observed: str, norm: str, evidence: list[str], drafted_at: str) -> str:
+    ev = ", ".join(evidence)
+    return (f"## {cid}\n"
+            f"- observed_friction: {_norm_oneline(observed)}\n"
+            f"- proposed_norm: {_norm_oneline(norm)}\n"
+            f"- evidence_runs: [{ev}]\n"
+            f"- status: pending\n"
+            f"- drafted_at: {drafted_at}\n")
+
+
+def set_candidate_status(path: Path, candidate_id: str, new_status: str) -> bool:
+    """candidates.md の指定候補ブロックの status 行を書き換える。"""
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    in_block, changed = False, False
+    for i, line in enumerate(lines):
+        if line.startswith("## candidate-"):
+            in_block = (line[3:].strip() == candidate_id)
+        elif in_block and line.lstrip().startswith("- status:"):
+            lines[i] = "- status: " + new_status
+            changed = True
+            in_block = False
+    if changed:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return changed
+
+
+# --- 規範候補の起草(種類A・自動。read-only・構造化出力。確定権は与えない) ---
+
+NORMS_DRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "candidates": {"type": "array", "items": {"type": "object", "properties": {
+            "observed_friction": {"type": "string"},  # 観察された摩擦の事実
+            "proposed_norm": {"type": "string"},       # 一般化された振る舞い規範(「〜する」)
+        }, "required": ["observed_friction", "proposed_norm"]}},
+        "none_reason": {"type": "string"},  # 候補なしのときの理由(可観測性)
+    },
+    "required": ["candidates"],
+}
+
+
+def _run_summary_for_norms(run_id: str, repo: Path) -> str:
+    """起草エージェントへ渡す構造化サマリ(front-matter + diff + 差し戻し理由)。
+    生 transcript も人間の review-notes も渡さない(poisoning と種類B 侵食を防ぐ)。"""
+    md = RUNS / f"{run_id}.md"
+    fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8")) if md.exists() else {}
+    keys = ("task", "verdict", "test_verdict", "verifier_verdict", "verifier_confidence")
+    head = "\n".join(f"- {k}: {fm[k]}" for k in keys if fm.get(k))
+    parts = [f"# run のサマリ(構造化)\n- run_id: {run_id}\n{head}"]
+    md_text = md.read_text(encoding="utf-8") if md.exists() else ""
+    if "## 目標契約" in md_text:
+        goal = md_text.split("## 目標契約", 1)[1].split("##", 1)[0].strip()
+        parts.append(f"# 目標契約\n{goal[:1500]}")
+    vj = RUNS / run_id / "verifier.json"
+    if vj.exists():
+        try:
+            obj = json.loads(vj.read_text(encoding="utf-8"))
+            rc = [str(c) for c in (obj.get("required_changes") or [])]
+            parts.append("# Verifier の指摘(差し戻し/判定理由)\n"
+                         f"- reasons: {_norm_oneline(obj.get('reasons', ''))[:800]}\n"
+                         + ("- required_changes:\n" + "\n".join(f"  - {c}" for c in rc) if rc else ""))
+        except json.JSONDecodeError:
+            pass
+    patch = RUNS / run_id / "change.patch"
+    if patch.exists():
+        parts.append("# 実装の diff(抜粋)\n```diff\n"
+                      + patch.read_text(encoding="utf-8", errors="replace")[:5000] + "\n```")
+    return "\n\n".join(parts)
+
+
+def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> dict | None:
+    """摩擦 run から規範候補を起草する(read-only・構造化出力)。ファイルは書かない。
+    backend(maybe_draft_norms)が candidates.md へ決定論的に追記する(generate_task と同じ分業)。"""
+    loop, agents = cfg["loop"], cfg["agents"]
+    model = agents.get("norms_drafter_model") or agents.get("author_model") or agents["implementer_model"]
+    summary = _run_summary_for_norms(run_id, repo)
+    prompt = (
+        "あなたは loop の『規範候補起草者』です。下の run で観察された**摩擦**(期待とのズレ・差し戻し・判定不能)から、"
+        "このリポジトリで今後**どう振る舞うべきか**という一般化された規範(手続き的記憶)の**候補**を起草してください。\n"
+        "**ファイルの作成・編集・コマンド実行は一切しないでください**(あなたに確定権はありません。起草のみ)。\n"
+        "必要なら Read/Grep/Glob で repo の実構成を read-only で確認して構いませんが、"
+        "**人間の review-notes.md は読まないでください**(人間の判断を学習に混ぜない)。\n\n"
+        "規範の条件:\n"
+        "- exit code では検証できない『設計・思想・振る舞い』レベルの規範であること(運用上の一過性エラーは対象外)。\n"
+        "- 『〜する』という能動的な決定手続きの形に一般化すること(この run 固有のエピソードのまま貯めない)。\n"
+        "- 一般化できる摩擦が無ければ candidates を空配列にし、none_reason に理由を書くこと(無理に作らない)。\n\n"
+        f"# トリガー\n{trigger}\n\n{summary}"
+    )
+    cmd = [
+        "claude", "-p", prompt,
+        "--output-format", "json",
+        "--model", model,
+        "--max-turns", "8",
+        "--max-budget-usd", str(loop["max_budget_usd"]),
+        "--permission-mode", loop.get("permission_mode", "default"),
+        "--allowedTools", "Read", "Grep", "Glob",
+        "--disallowedTools", *WRITE_TOOLS,  # global settings を上書きして read-only 強制(起草のみ)
+        "--json-schema", json.dumps(NORMS_DRAFT_SCHEMA, ensure_ascii=False),
+    ]
+    try:
+        proc = subprocess.run(cmd, cwd=str(repo), capture_output=True, text=True,
+                              timeout=loop["timeout_seconds"])
+        result = json.loads(proc.stdout)
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+    obj = result.get("structured_output")
+    return obj if isinstance(obj, dict) else None
+
+
+def maybe_draft_norms(run_id: str, repo: Path | None, cfg: dict, trigger: str) -> None:
+    """摩擦 run の規範候補を起草し candidates.md へ追記する(種類A)。conventions.md には絶対に書かない。
+    空振り・失敗は黙って握り潰さず run のログ(norms.json)と stdout に残す(可観測性)。"""
+    if repo is None or not cfg.get("loop", {}).get("norms_enabled", True):
+        return
+    if not repo.is_dir():  # stale な repo パス(別マシンの run 等)では起草を試みない
+        print(f"  · 規範候補: repo が存在しないため起草をスキップ({repo})")
+        return
+    run_dir = RUNS / run_id
+    log = run_dir / "norms.json"
+    obj = draft_norm_candidates(run_id, repo, cfg, trigger)
+    if not isinstance(obj, dict):
+        try:
+            log.write_text(json.dumps({"trigger": trigger, "error": "起草に失敗(出力不正/timeout)"},
+                                      ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+        print("  · 規範候補: 起草に失敗(出力不正)→ candidates.md は変更なし")
+        return
+    cands = [c for c in (obj.get("candidates") or []) if isinstance(c, dict) and c.get("proposed_norm")]
+    try:
+        log.write_text(json.dumps({"trigger": trigger, **obj}, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    if not cands:
+        reason = _norm_oneline(obj.get("none_reason", "")) or "一般化できる規範なし"
+        print(f"  · 規範候補: 抽出できず({reason})")
+        return
+    _, cpath = norms_paths(repo, cfg)
+    drafted_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    with _DATA_COMMIT_LOCK:  # 並行 run の candidates.md 追記・loop.db 書込みを直列化
+        cpath.parent.mkdir(parents=True, exist_ok=True)
+        existing = len([c for c in parse_candidates(cpath) if c["candidate_id"].startswith(f"candidate-{run_id}-")])
+        conn = loopdb.connect(DB)
+        rname = repo_norm_name(repo, cfg)
+        blocks = []
+        for i, c in enumerate(cands, start=existing + 1):
+            cid = f"candidate-{run_id}-{i}"
+            blocks.append(_render_candidate(cid, c.get("observed_friction", ""), c["proposed_norm"], [run_id], drafted_at))
+            loopdb.upsert_norm_candidate(conn, {
+                "candidate_id": cid, "repo": rname, "run_id": run_id, "status": "pending",
+                "observed_friction": _norm_oneline(c.get("observed_friction", "")),
+                "proposed_norm": _norm_oneline(c["proposed_norm"]), "drafted_at": drafted_at,
+            })
+        conn.close()
+        with cpath.open("a", encoding="utf-8") as f:
+            if cpath.stat().st_size == 0:
+                f.write(f"# {rname} の規範候補(昇格待ちの控え室。run には注入されない)\n\n")
+            f.write("\n".join(blocks))
+        auto_commit(DATA, [cpath], f"norms: {run_id} から規範候補 {len(cands)} 件を起草(pending)")
+    print(f"  · 規範候補: {len(cands)} 件を candidates.md に起草(pending / 昇格は人間)")
+
+
+def reindex_norms() -> int:
+    """全 repo の candidates.md を走査して loop.db の norm_candidates を再生成する(派生・非 authoritative)。"""
+    conn = loopdb.connect(DB)
+    loopdb.clear_norm_candidates(conn)
+    n = 0
+    if NORMS_ROOT.exists():
+        for cpath in sorted(NORMS_ROOT.glob("*/candidates.md")):
+            rname = cpath.parent.name
+            for c in parse_candidates(cpath):
+                m = re.match(r"candidate-(.+)-\d+$", c["candidate_id"])
+                loopdb.upsert_norm_candidate(conn, {
+                    "candidate_id": c["candidate_id"], "repo": rname,
+                    "run_id": m.group(1) if m else None, "status": c.get("status", "pending"),
+                    "observed_friction": c.get("observed_friction", ""),
+                    "proposed_norm": c.get("proposed_norm", ""), "drafted_at": c.get("drafted_at"),
+                })
+                n += 1
+    conn.close()
+    return n
 
 
 def _finalize_run(task: dict, run_id: str, run_dir: Path, md: Path, final: str, commit_msg: str) -> None:
@@ -954,12 +1222,43 @@ def judgment_line(md: Path) -> int:
     return 1
 
 
+def _repo_from_run_md(md: Path) -> Path | None:
+    """run MD の front-matter の repo(絶対パス文字列)を Path に戻す('none' は None)。"""
+    fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8")) if md.exists() else {}
+    r = str(fm.get("repo", "") or "").strip()
+    if not r or r.lower() == "none":
+        return None
+    return Path(r)
+
+
+def maybe_draft_on_review(run_id: str, cfg: dict) -> None:
+    """トリガー3(人間レビューで verdict が覆った): run MD front-matter の human_verdict が
+    runner の verdict と食い違うとき、規範候補を起草する(種類A の起草 / 覆し判断は人間=種類B)。
+    human_verdict は人間が nvim で任意に書く構造化シグナル(無ければ何もしない)。"""
+    if not cfg.get("loop", {}).get("norms_enabled", True) or not cfg.get("loop", {}).get("norms_draft_on_friction", True):
+        return
+    md = RUNS / f"{run_id}.md"
+    if not md.exists():
+        return
+    fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8"))
+    human = str(fm.get("human_verdict", "") or "").strip()
+    if not human or human == str(fm.get("verdict", "") or "").strip():
+        return
+    repo = _repo_from_run_md(md)
+    try:
+        maybe_draft_norms(run_id, repo, cfg,
+                          f"人間レビューで verdict が覆った(runner={fm.get('verdict')} → human={human})")
+    except Exception as ex:
+        print(f"  · 規範候補: 起草中に例外(無視) {ex!r}")
+
+
 def mark_reviewed(run_id: str, cfg: dict) -> None:
-    """種類A: 判断記入後の後処理。reviewed 化 → SQLite upsert → コミット。"""
+    """種類A: 判断記入後の後処理。reviewed 化 → SQLite upsert → コミット → (覆しがあれば)規範候補起草。"""
     md = RUNS / f"{run_id}.md"
     set_md_reviewed(md)
     _reindex_md(md)
     auto_commit(DATA, [md], f"review: {run_id} を reviewed 化")
+    maybe_draft_on_review(run_id, cfg)
 
 
 def unreviewed_runs() -> list[Path]:
@@ -1033,6 +1332,7 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
     set_md_reviewed(md)
     _reindex_md(md)
     auto_commit(DATA, [md, REVIEW_NOTES], f"review: {run_id} 判断を記入し reviewed 化")
+    maybe_draft_on_review(run_id, cfg)
 
 
 # --- PR promotion(run=pass 後: PR 作成 → CI/Copilot が green になるまで Implementer 差し戻し) ---
@@ -1239,12 +1539,14 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
         verifier_obj = None
         retryable = False
+        revise_occurred = False  # 摩擦トリガー: revise 差し戻しが起きたか(規範候補の起草条件)
         test_verdict, verifier_verdict, vcode = "none", "handoff", None
         final = "fail"
 
-        # 1) 事前情報: Author 生成の実装プラン(生成時に repo を read-only 調査済み)+ 過去 run の事実ブリーフ。
+        # 1) 事前情報: Author 生成の実装プラン(生成時に repo を read-only 調査済み)+ 規範(承認済み)+ 過去 run の事実。
         impl_context = read_plan(task.get("id", ""))
-        brief = build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))  # 同一 repo の過去 run の事実(種類A)
+        # 注入順 = 優先順位: 承認済み規範(手続き的記憶)→ 過去 run の事実(両方とも CLAUDE.md/憲法 には劣後)。
+        brief = build_norms_brief(repo, cfg) + build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))
 
         # 2) Implementer(read-write、自己テストまで)。差し戻し時は同一セッションを --resume で継続。
         write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
@@ -1282,6 +1584,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                     verifier_verdict = "handoff"  # 死角を作らない: 未確証は pass にせず人間へ
                     break
                 rounds += 1
+                revise_occurred = True
                 print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})→ Implementer 再実装 …")
                 write_run_status(run_id=run_id, phase="implementer")
                 i_result, i_hint = run_role(
@@ -1318,6 +1621,19 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                           test_verdict, verifier_verdict, verifier_obj, roles, repo=repo,
                           pr_url=(promote_info or {}).get("pr_url"))
         _finalize_run(task, run_id, run_dir, md, final, f"run: {run_id} → {final}")
+
+        # 摩擦のある run でだけ規範候補を起草する(種類A)。毎 run ではない。昇格は人間(種類B)。
+        if not retryable and loop.get("norms_enabled", True) and loop.get("norms_draft_on_friction", True):
+            triggers = []
+            if revise_occurred:
+                triggers.append("Implementer の revise 差し戻しが発生(required_changes)")
+            if verifier_verdict == "handoff":
+                triggers.append("Verifier が handoff(自動判定では確証できず)")
+            if triggers:
+                try:
+                    maybe_draft_norms(run_id, repo, cfg, " / ".join(triggers))
+                except Exception as ex:  # 起草の失敗を run 確定に波及させない
+                    print(f"  · 規範候補: 起草中に例外(無視) {ex!r}")
 
         print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
         branch_note = f"branch {branch} に成果をコミット" if committed else f"branch {branch}(変更なし)"
@@ -1464,7 +1780,8 @@ def cmd_reindex() -> int:
     conn = loopdb.connect(DB)
     n = loopdb.reindex(conn, RUNS)
     conn.close()
-    print(f"reindex 完了: {n} 件の run MD から loop.db を再生成しました。")
+    nc = reindex_norms()  # 規範候補(candidates.md)も MD から派生インデックスを再生成
+    print(f"reindex 完了: run MD {n} 件 / 規範候補 {nc} 件から loop.db を再生成しました。")
     return 0
 
 
@@ -1484,6 +1801,102 @@ def cmd_review() -> int:
     mark_reviewed(run_id, cfg)
     print(f"  · {run_id}: reviewed:true / SQLite upsert / コミット 完了")
     return 0
+
+
+def _find_candidate(candidate_id: str) -> tuple[Path, dict] | None:
+    """全 repo の candidates.md を走査して candidate_id を持つ (candidates_path, 候補dict) を返す。"""
+    if not NORMS_ROOT.exists():
+        return None
+    for cpath in sorted(NORMS_ROOT.glob("*/candidates.md")):
+        for c in parse_candidates(cpath):
+            if c["candidate_id"] == candidate_id:
+                return cpath, c
+    return None
+
+
+def cmd_norms(rest: list[str]) -> int:
+    """規範記憶の昇格配管(種類B の人間作業の補助のみ。規範文の生成・要約・推奨はしない)。
+    usage: norms [list] | promote <id> | reject <id> | draft <run_id> [--reason <text>]"""
+    import os
+    cfg = load_config()
+    action = rest[0] if rest else "list"
+
+    if action == "list":
+        rows = []
+        if NORMS_ROOT.exists():
+            for cpath in sorted(NORMS_ROOT.glob("*/candidates.md")):
+                for c in parse_candidates(cpath):
+                    if c.get("status", "pending") == "pending":
+                        rows.append((cpath.parent.name, c))
+        if not rows:
+            print("pending な規範候補はありません(摩擦 run が出ると起草されます)。")
+            return 0
+        print(f"pending な規範候補 {len(rows)} 件(昇格は人間: norms promote/reject <id>):\n")
+        for rname, c in rows:
+            print(f"● {c['candidate_id']}  [{rname}]")
+            print(f"    摩擦: {c.get('observed_friction', '')}")
+            print(f"    規範案: {c.get('proposed_norm', '')}")
+            print(f"    evidence: {c.get('evidence_runs', [])}\n")
+        return 0
+
+    if action in ("promote", "reject"):
+        if len(rest) < 2:
+            print(f"usage: norms {action} <candidate_id>")
+            return 2
+        found = _find_candidate(rest[1])
+        if not found:
+            print(f"候補が見つかりません: {rest[1]}")
+            return 1
+        cpath, c = found
+        if action == "reject":
+            set_candidate_status(cpath, c["candidate_id"], "rejected")
+            reindex_norms()
+            auto_commit(DATA, [cpath], f"norms: {c['candidate_id']} を reject")
+            print(f"  · {c['candidate_id']} を rejected にしました。")
+            return 0
+        # promote: proposed_norm を conventions.md に追記 → 人間が nvim で統合・上書き・剪定 → status 更新。
+        conv = cpath.parent / "conventions.md"
+        promoted_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        ev = ", ".join(c.get("evidence_runs", []))
+        block = (f"\n## (昇格: {c['candidate_id']} — 見出し/文言は人間が調整)\n"
+                 f"{c.get('proposed_norm', '')}\n"
+                 f"- evidence_runs: [{ev}]\n"
+                 f"- promoted_at: {promoted_at}\n")
+        with _DATA_COMMIT_LOCK:
+            conv.parent.mkdir(parents=True, exist_ok=True)
+            if not conv.exists() or conv.stat().st_size == 0:
+                conv.write_text(f"# {cpath.parent.name} の設計規範(承認済み・run に注入される)\n\n"
+                                "> 人間が candidates.md から昇格させた規範のみ。CLAUDE.md(憲法)に劣後する。\n",
+                                encoding="utf-8")
+            with conv.open("a", encoding="utf-8") as f:
+                f.write(block)
+        editor = os.environ.get("EDITOR", "nvim")
+        print(f"  · {c['candidate_id']} の規範案を conventions.md へ追記しました。")
+        print(f"  · {editor} で開きます。**統合・上書き・文言調整・剪定は人間が**行ってください(保存して閉じると確定)。")
+        subprocess.run([editor, str(conv)])
+        with _DATA_COMMIT_LOCK:
+            set_candidate_status(cpath, c["candidate_id"], "promoted")
+            reindex_norms()
+            auto_commit(DATA, [conv, cpath], f"norms: {c['candidate_id']} を conventions.md へ昇格")
+        print(f"  · {c['candidate_id']} を promoted にし、conventions.md を確定しました。")
+        return 0
+
+    if action == "draft":
+        if len(rest) < 2:
+            print("usage: norms draft <run_id> [--reason <text>]")
+            return 2
+        run_id = rest[1]
+        md = RUNS / f"{run_id}.md"
+        if not md.exists():
+            print(f"run が見つかりません: {run_id}")
+            return 1
+        reason = rest[rest.index("--reason") + 1] if "--reason" in rest and rest.index("--reason") + 1 < len(rest) else "人間が手動で起草を要求(レビュー時の摩擦)"
+        repo = _repo_from_run_md(md)
+        maybe_draft_norms(run_id, repo, cfg, reason)
+        return 0
+
+    print(f"unknown norms action: {action}\nusage: norms [list] | promote <id> | reject <id> | draft <run_id> [--reason <text>]")
+    return 2
 
 
 def cmd_status() -> int:
@@ -1510,10 +1923,13 @@ def main() -> int:
         rest = sys.argv[3:]
         repo = rest[rest.index("--repo") + 1] if "--repo" in rest and rest.index("--repo") + 1 < len(rest) else None
         return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest, repo)
+    if cmd == "norms":
+        return cmd_norms(sys.argv[2:])
     table = {"reindex": cmd_reindex, "review": cmd_review, "status": cmd_status}
     if cmd in table:
         return table[cmd]()
-    print(f"unknown command: {cmd}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|review|reindex|status]", file=sys.stderr)
+    print("unknown command: {}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|review|reindex|status|"
+          "norms [list|promote <id>|reject <id>|draft <run_id>]]".format(cmd), file=sys.stderr)
     return 2
 
 

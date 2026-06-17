@@ -40,11 +40,30 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
+# 規範候補(手続き的記憶の控え室)の派生インデックス。真実は repo/<name>/candidates.md(MD)。
+# reindex で MD から完全再生成できる(authoritative にしない)。
+NORM_CANDIDATE_COLUMNS = [
+    "candidate_id", "repo", "run_id", "status", "observed_friction", "proposed_norm", "drafted_at",
+]
+
+NORM_SCHEMA = """
+CREATE TABLE IF NOT EXISTS norm_candidates (
+  candidate_id      TEXT PRIMARY KEY,
+  repo              TEXT,
+  run_id            TEXT,
+  status            TEXT,
+  observed_friction TEXT,
+  proposed_norm     TEXT,
+  drafted_at        TEXT
+);
+"""
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    conn.executescript(NORM_SCHEMA)
     return conn
 
 
@@ -122,4 +141,19 @@ def reindex(conn: sqlite3.Connection, runs_dir: Path) -> int:
 
 def set_reviewed(conn: sqlite3.Connection, run_id: str, reviewed: bool) -> None:
     conn.execute("UPDATE runs SET reviewed=? WHERE run_id=?", (1 if reviewed else 0, run_id))
+    conn.commit()
+
+
+def upsert_norm_candidate(conn: sqlite3.Connection, row: dict) -> None:
+    placeholders = ",".join("?" for _ in NORM_CANDIDATE_COLUMNS)
+    conn.execute(
+        f"INSERT OR REPLACE INTO norm_candidates ({','.join(NORM_CANDIDATE_COLUMNS)}) VALUES ({placeholders})",
+        [row.get(c) for c in NORM_CANDIDATE_COLUMNS],
+    )
+    conn.commit()
+
+
+def clear_norm_candidates(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS norm_candidates")
+    conn.executescript(NORM_SCHEMA)
     conn.commit()
