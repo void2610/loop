@@ -16,14 +16,17 @@ router = APIRouter(tags=["tasks"])
 
 
 @router.get("/tasks", response_model=schemas.TaskListResponse)
-def list_tasks():
+def list_tasks(include_archived: bool = False):
     last = {k: schemas.LastRun(**v) for k, v in util.latest_runs().items()}
     tasks = []
     for t in runner.parse_tasks():
+        archived = str(t.get("archived", "false")).lower() in ("true", "1")
+        if archived and not include_archived:
+            continue
         tid = t.get("id")
         tasks.append(schemas.TaskRow(
             id=tid, goal=t.get("goal"), status=t.get("status", "todo"),
-            repo=t.get("repo"), last_run=last.get(tid)))
+            repo=t.get("repo"), archived=archived, last_run=last.get(tid)))
     return schemas.TaskListResponse(
         tasks=tasks, last=last, running=(runner.DATA / ".run.lock").exists())
 
@@ -68,11 +71,9 @@ def update_task(inp: schemas.TaskInput, task_id: str = Depends(valid_task_id)):
     return schemas.TaskIdResult(task_id=task_id)
 
 
-@router.delete("/tasks/{task_id}", status_code=204, openapi_extra={"x-loop-kind": "A"})
-def delete_task(task_id: str = Depends(valid_task_id)):
-    p = runner.TASKS_DIR / f"{task_id}.md"
-    if p.exists():
-        p.unlink()
-        runner.git(runner.DATA, "add", "-A", "--", "tasks")
-        runner.git(runner.DATA, "commit", "-q", "-m", f"todo: {task_id} を削除")
+@router.post("/tasks/{task_id}/archive", status_code=204, openapi_extra={"x-loop-kind": "A"})
+def archive_task(inp: schemas.ArchiveInput, task_id: str = Depends(valid_task_id)):
+    # 削除しない。UI から隠すための archived フラグを立てる/外すだけ(ログは資産)。
+    if not runner.set_task_archived(task_id, inp.archived):
+        raise HTTPException(404, err("not_found", f"task not found: {task_id}"))
     return Response(status_code=204)

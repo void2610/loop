@@ -105,7 +105,7 @@ async function request<T>(
 
 // --- 読み取り(GET。副作用なし。reindex はインデックス再生成で契約ファイルを書き換えない) ---
 export const api = {
-  listRuns: (params?: { verdict?: string; reviewed?: 0 | 1; task?: string }) =>
+  listRuns: (params?: { verdict?: string; reviewed?: 0 | 1; task?: string; include_archived?: boolean }) =>
     request<RunListResponse>("GET", "/runs", { query: params }),
 
   runDetail: (runId: string) =>
@@ -128,7 +128,8 @@ export const api = {
   runLive: (runId: string) =>
     request<LiveSnapshot>("GET", `/runs/${encodeURIComponent(runId)}/live`),
 
-  listTasks: () => request<TaskListResponse>("GET", "/tasks"),
+  listTasks: (params?: { include_archived?: boolean }) =>
+    request<TaskListResponse>("GET", "/tasks", { query: params }),
 
   taskDetail: (taskId: string) =>
     request<TaskDetail>("GET", `/tasks/${encodeURIComponent(taskId)}`),
@@ -149,8 +150,13 @@ export const api = {
   updateTask: (taskId: string, body: TaskInput) =>
     request<{ task_id: string }>("PUT", `/tasks/${encodeURIComponent(taskId)}`, { body }),
 
-  deleteTask: (taskId: string) =>
-    request<void>("DELETE", `/tasks/${encodeURIComponent(taskId)}`),
+  /** タスクをアーカイブ/解除(削除しない=ログは資産。UI から隠すだけ)。204。 */
+  archiveTask: (taskId: string, archived: boolean) =>
+    request<void>("POST", `/tasks/${encodeURIComponent(taskId)}/archive`, { body: { archived } }),
+
+  /** run をアーカイブ/解除(削除しない)。204。 */
+  archiveRun: (runId: string, archived: boolean) =>
+    request<void>("POST", `/runs/${encodeURIComponent(runId)}/archive`, { body: { archived } }),
 
   // --- 実行起動(x-loop-exec。claude -p を起動する RCE 露出点。busy は 409) ---
 

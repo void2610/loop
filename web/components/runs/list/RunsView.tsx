@@ -17,11 +17,12 @@ export function RunsView() {
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   // 連打・タイプ中の古いレスポンスで新しい結果を上書きしないための世代カウンタ。
   const reqSeq = useRef(0);
 
-  const load = useCallback(async (f: RunsFilter) => {
+  const load = useCallback(async (f: RunsFilter, archived: boolean) => {
     const seq = ++reqSeq.current;
     setLoading(true);
     setError(null);
@@ -30,6 +31,7 @@ export function RunsView() {
         verdict: f.verdict || undefined,
         reviewed: f.reviewed === "" ? undefined : (Number(f.reviewed) as 0 | 1),
         task: f.task || undefined,
+        include_archived: archived || undefined,
       });
       if (seq !== reqSeq.current) return;
       setRuns(res.runs);
@@ -46,9 +48,9 @@ export function RunsView() {
 
   // task テキスト入力はデバウンス、verdict/reviewed は即時反映。
   useEffect(() => {
-    const t = setTimeout(() => void load(filter), 250);
+    const t = setTimeout(() => void load(filter, includeArchived), 250);
     return () => clearTimeout(t);
-  }, [filter, load]);
+  }, [filter, includeArchived, load]);
 
   const onDispatch = useCallback(async () => {
     setDispatching(true);
@@ -90,6 +92,15 @@ export function RunsView() {
         onChange={setFilter}
         onDispatch={onDispatch}
       />
+
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={includeArchived}
+          onChange={(e) => setIncludeArchived(e.target.checked)}
+        />
+        アーカイブ済みも表示
+      </label>
 
       {notice ? (
         <p className="text-sm text-muted-foreground">{notice}</p>

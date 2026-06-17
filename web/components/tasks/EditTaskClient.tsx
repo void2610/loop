@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { DeleteTaskButton } from "@/components/tasks/DeleteTaskButton";
+import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
 import { RepoBadge } from "@/components/tasks/RepoBadge";
 import { RunTaskButton } from "@/components/tasks/RunTaskButton";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -93,9 +93,9 @@ export function EditTaskClient({ taskId }: { taskId: string }) {
           未保存の編集は反映されません。先に保存してください。
         </span>
         <div className="ml-auto">
-          <DeleteTaskButton
+          <ArchiveTaskButton
             taskId={detail.fields.task_id}
-            onDeleted={() => {
+            onChanged={() => {
               router.push("/tasks");
               router.refresh();
             }}

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { api, ApiError, type RunDetail } from "@/lib/api";
 import { repoLabel } from "@/lib/repoLabel";
+import { ArchiveRunButton } from "@/components/runs/ArchiveRunButton";
 import { Badge } from "@/components/ui/badge";
 
 import {
@@ -40,6 +41,7 @@ export function RunDetailView({ runId }: { runId: string }) {
     next: null,
   });
   const formRef = useRef<JudgmentFormHandle>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +60,7 @@ export function RunDetailView({ runId }: { runId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, reloadKey]);
 
   // 前後 run の id を一覧順(started_at DESC)から導出。j=次(下)/k=前(上)。
   useEffect(() => {
@@ -172,6 +174,13 @@ export function RunDetailView({ runId }: { runId: string }) {
             未レビュー
           </Badge>
         )}
+        <span className="ml-auto">
+          <ArchiveRunButton
+            runId={detail.run_id}
+            archived={!!fm.archived && fm.archived !== "false"}
+            onChanged={() => setReloadKey((k) => k + 1)}
+          />
+        </span>
       </div>
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">

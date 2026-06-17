@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-import { DeleteTaskButton } from "@/components/tasks/DeleteTaskButton";
+import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
 import { RepoBadge } from "@/components/tasks/RepoBadge";
 import { RunTaskButton } from "@/components/tasks/RunTaskButton";
 import { Badge } from "@/components/ui/badge";
@@ -162,7 +162,7 @@ export function TaskList() {
                         disabled={running}
                         onStarted={() => void load()}
                       />
-                      <DeleteTaskButton taskId={t.id} onDeleted={() => void load()} />
+                      <ArchiveTaskButton taskId={t.id} archived={!!t.archived} onChanged={() => void load()} />
                     </div>
                   </TableCell>
                 </TableRow>

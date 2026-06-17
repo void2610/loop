@@ -742,6 +742,45 @@ def set_md_reviewed(md: Path) -> None:
     md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _set_fm_key(path: Path, key: str, value: str) -> None:
+    """front-matter の key 行を value に書き換える(無ければ追加)。"""
+    lines, s, e = _split_front_matter(path.read_text(encoding="utf-8"))
+    if e == 0:
+        return
+    for k in range(s, e):
+        if lines[k].split(":", 1)[0].strip() == key:
+            lines[k] = f"{key}: {value}"
+            break
+    else:
+        lines.insert(e, f"{key}: {value}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def set_task_archived(task_id: str, archived: bool) -> bool:
+    """タスクをアーカイブ/解除(削除しない=ログは資産)。front-matter の archived を立てる。"""
+    t = next((x for x in parse_tasks() if x.get("id") == task_id), None)
+    if not t:
+        return False
+    _set_fm_key(t["_path"], "archived", "true" if archived else "false")
+    verb = "アーカイブ" if archived else "アーカイブ解除"
+    auto_commit(DATA, [t["_path"]], f"todo: {task_id} を{verb}")
+    return True
+
+
+def set_run_archived(run_id: str, archived: bool) -> bool:
+    """run をアーカイブ/解除(削除しない)。run MD の archived を立て SQLite を再導出。"""
+    md = RUNS / f"{run_id}.md"
+    if not md.exists():
+        return False
+    _set_fm_key(md, "archived", "true" if archived else "false")
+    conn = loopdb.connect(DB)
+    loopdb.upsert_md(conn, md)
+    conn.close()
+    verb = "アーカイブ" if archived else "アーカイブ解除"
+    auto_commit(DATA, [md], f"run: {run_id} を{verb}")
+    return True
+
+
 def judgment_line(md: Path) -> int:
     for i, line in enumerate(md.read_text(encoding="utf-8").splitlines(), start=1):
         if line.startswith(JUDGMENT_HEADING):

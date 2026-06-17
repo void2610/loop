@@ -17,9 +17,19 @@ router = APIRouter(tags=["runs"])
 
 
 @router.get("/runs", response_model=schemas.RunListResponse)
-def list_runs(verdict: str | None = None, reviewed: str | None = None, task: str | None = None):
-    rows, verdicts = util.reindex_and_query(verdict or None, reviewed or None, task or None)
+def list_runs(verdict: str | None = None, reviewed: str | None = None, task: str | None = None,
+              include_archived: bool = False):
+    rows, verdicts = util.reindex_and_query(verdict or None, reviewed or None, task or None,
+                                            include_archived=include_archived)
     return schemas.RunListResponse(runs=[schemas.RunRow(**r) for r in rows], verdicts=verdicts)
+
+
+@router.post("/runs/{run_id}/archive", status_code=204, openapi_extra={"x-loop-kind": "A"})
+def archive_run(inp: schemas.ArchiveInput, run_id: str = Depends(valid_run_id)):
+    # run は削除しない(契約=真実の源)。UI 非表示のための archived フラグのみ。
+    if not runner.set_run_archived(run_id, inp.archived):
+        raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
+    return Response(status_code=204)
 
 
 @router.get("/runs/{run_id}", response_model=schemas.RunDetail)

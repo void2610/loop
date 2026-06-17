@@ -49,11 +49,14 @@ def repo_label(raw) -> str:
     return Path(s).name if "/" in s else s
 
 
-def reindex_and_query(verdict: str | None, reviewed: str | None, task: str | None):
-    """loop.db を MD から再生成して runs を抽出(使い捨てレンズ)。現 _reindex_and_query。"""
+def reindex_and_query(verdict: str | None, reviewed: str | None, task: str | None,
+                      include_archived: bool = False):
+    """loop.db を MD から再生成して runs を抽出(使い捨てレンズ)。既定でアーカイブ済みは除外。"""
     conn = loopdb.connect(DB)
     loopdb.reindex(conn, RUNS)
     q, params = "SELECT * FROM runs WHERE 1=1", []
+    if not include_archived:
+        q += " AND COALESCE(archived,0)=0"
     if verdict:
         q += " AND verdict=?"; params.append(verdict)
     if reviewed in ("0", "1"):

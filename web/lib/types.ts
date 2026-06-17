@@ -115,7 +115,7 @@ export interface paths {
         };
         /**
          * Stream Monitor
-         * @description monitor 全体の SSE 枠。event: status / run_done / heartbeat(本実装は WS4)。
+         * @description monitor 全体の SSE。status 変化 / 新 run 出現(run_done)/ heartbeat を継続配信。
          */
         get: operations["stream_monitor_api_stream_monitor_get"];
         put?: never;
@@ -135,7 +135,7 @@ export interface paths {
         };
         /**
          * Stream Run
-         * @description 進行中 run のライブ transcript SSE 枠。event: event / phase / end(本実装は WS4)。
+         * @description 進行中 run のライブ transcript SSE。role別 stream.jsonl を tail して event/phase/end を配信。
          */
         get: operations["stream_run_api_runs__run_id__stream_get"];
         put?: never;
@@ -157,6 +157,23 @@ export interface paths {
         get: operations["list_runs_api_runs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Run */
+        post: operations["archive_run_api_runs__run_id__archive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -380,8 +397,24 @@ export interface paths {
         /** Update Task */
         put: operations["update_task_api_tasks__task_id__put"];
         post?: never;
-        /** Delete Task */
-        delete: operations["delete_task_api_tasks__task_id__delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Task */
+        post: operations["archive_task_api_tasks__task_id__archive_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -648,6 +681,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ArchiveInput
+         * @description アーカイブ(UI 非表示)/解除。削除はしない(ログは資産)。
+         */
+        ArchiveInput: {
+            /**
+             * Archived
+             * @default true
+             */
+            archived: boolean;
+        };
         /** Body_judge_legacy_run__run_id__judge_post */
         Body_judge_legacy_run__run_id__judge_post: {
             /**
@@ -1043,6 +1087,8 @@ export interface components {
             reviewed?: number | null;
             /** Repo */
             repo?: string | null;
+            /** Archived */
+            archived?: number | null;
             /** Started At */
             started_at?: string | null;
         } & {
@@ -1189,6 +1235,11 @@ export interface components {
             status?: string | null;
             /** Repo */
             repo?: string | null;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
             last_run?: components["schemas"]["LastRun"] | null;
         } & {
             [key: string]: unknown;
@@ -1461,6 +1512,7 @@ export interface operations {
                 verdict?: string | null;
                 reviewed?: string | null;
                 task?: string | null;
+                include_archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -1476,6 +1528,39 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RunListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_run_api_runs__run_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1776,7 +1861,9 @@ export interface operations {
     };
     list_tasks_api_tasks_get: {
         parameters: {
-            query?: never;
+            query?: {
+                include_archived?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1790,6 +1877,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1913,7 +2009,7 @@ export interface operations {
             };
         };
     };
-    delete_task_api_tasks__task_id__delete: {
+    archive_task_api_tasks__task_id__archive_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1922,7 +2018,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveInput"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

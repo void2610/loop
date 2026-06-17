@@ -36,10 +36,13 @@ def monitor_snapshot():
     conn = util.loopdb.connect(util.DB)
     recent = [dict(r) for r in conn.execute(
         "SELECT run_id, task, verdict, reviewed, repo, started_at FROM runs "
-        "ORDER BY started_at DESC, run_id DESC LIMIT 12")]
-    unreviewed = conn.execute("SELECT COUNT(*) FROM runs WHERE reviewed=0").fetchone()[0]
+        "WHERE COALESCE(archived,0)=0 ORDER BY started_at DESC, run_id DESC LIMIT 12")]
+    unreviewed = conn.execute(
+        "SELECT COUNT(*) FROM runs WHERE reviewed=0 AND COALESCE(archived,0)=0").fetchone()[0]
     conn.close()
-    pending = sum(1 for t in runner.parse_tasks() if str(t.get("status", "todo")).lower() == "todo")
+    pending = sum(1 for t in runner.parse_tasks()
+                  if str(t.get("status", "todo")).lower() == "todo"
+                  and str(t.get("archived", "false")).lower() not in ("true", "1"))
     return schemas.MonitorSnapshot(
         status=status, recent=[schemas.RunRow(**r) for r in recent],
         unreviewed=unreviewed, pending=pending, phases=_PHASES)

@@ -23,6 +23,7 @@ class RunRow(BaseModel):
     verdict: str | None = None
     reviewed: int | None = None
     repo: str | None = None
+    archived: int | None = None
     started_at: str | None = None
 
 
@@ -80,6 +81,7 @@ class TaskRow(BaseModel):
     goal: str | None = None
     status: str | None = None
     repo: str | None = None
+    archived: bool = False
     last_run: LastRun | None = None
 
 
@@ -166,6 +168,14 @@ class JudgmentInput(BaseModel):
     risk: str = ""
     checks: str = ""
     learning: str = ""
+
+
+class ArchiveInput(BaseModel):
+    """アーカイブ(UI 非表示)/解除。削除はしない(ログは資産)。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    archived: bool = True
 
 
 class GenerateInput(BaseModel):
