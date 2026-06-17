@@ -47,7 +47,8 @@ data/(別 private repo / engine からは .gitignore):
   tasks/<id>.md  tasks/plans/<id>.md(Author 生成の実装プラン)  runs/<id>.md + runs/<id>/  review-notes.md  plans/(設計メモ)  loop.db
 ```
 
-> **run の役割フロー(現行)**: `Author プラン → Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise なら Implementer を `--resume` で差し戻し)`。
+> **run の役割フロー(現行)**: `Author プラン → Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise なら Implementer を `--resume` で差し戻し)→ [promote: pass のみ]`。
+> - **promote 段(`promote_on_pass`、既定 false)**: run=pass の成果を PR 化し、**GitHub CI + Copilot レビュー**が green になるまで Implementer を `--resume` で差し戻して回す(種類A)。**merge は人間(自動 merge しない)**。上限 `promote_rounds` 超過は green にせず handoff。証拠は `promote.roundN.json` / `promote.json`、PR URL は run MD の `pr_url`。実 PR で green 収束を確認済み。
 > - **Author = Explorer 統合**: 生成時に repo を read-only 調査し詳細プランを `tasks/plans/<id>.md` に出力。run 時はこのプランを Implementer に渡す(run 時 Explorer は廃止。プラン無しの手動タスクはプラン無しで Implementer 直行)。repo は常に在る前提(no-repo 分岐は撤去)。
 > - **revise ループ**: Verifier は `pass/fail/revise/handoff`。`revise` は `required_changes` を付けて Implementer に差し戻し、**同一セッションを `--resume` で継続**(前文脈保持)。回数上限 `loop.implementer_revise_rounds`(既定 2)。上限超過でも pass にせず handoff(死角を作らない)。決定論ゲートは床のまま(`test=fail → fail`、空通りテストは Verifier が revise/handoff)。
 
@@ -73,6 +74,7 @@ data/(別 private repo / engine からは .gitignore):
 - **生成(`runner gen`)**は「実行せず変換せよ」を明示し turn 上限を小さく(8)している。これを緩めると遅くなる。
 - **Next は `output: standalone`**。`next start` は警告を出す(静的が欠ける恐れ)。本番起動は `node .next/standalone/server.js` で、`just web-build` が `.next/static` を standalone へコピーする。
 - **webapp は Python 3.12 ピン**(元は jinja が 3.14 で壊れるため。jinja/legacy 撤去済みだが保守的に据置。上げるなら fastapi/uvicorn の 3.14 動作確認が要る)。runner 等は 3.14 で可。
+- **Copilot レビュー要求は REST で行う**: `gh pr edit --add-reviewer "@copilot"` は**無言失敗**する。`gh api -X POST repos/{slug}/pulls/{n}/requested_reviewers -f "reviewers[]=copilot-pull-request-reviewer[bot]"` を使う。検知は `gh pr view --json reviewRequests` が **bot を出さない**ので REST `requested_reviewers`(login=`Copilot`)を見る。Copilot は要求後 ~30s でレビュー投稿(reviewThreads 化)、CI は `gh pr checks --json bucket`(pending/pass/fail)。promote はこれらを実 PR で確認済み(personal repo でも Copilot 動作)。
 - macOS には `setsid` が無い。`just app` の `trap 'kill 0'` は**同一プロセスグループの呼び出しシェルまで巻き込む**ので、検証時は `run_in_background` で別ツリーに起動する。
 
 ---

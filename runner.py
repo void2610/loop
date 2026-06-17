@@ -16,10 +16,12 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -732,7 +734,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
                  cfg: dict, started_at: str, verify_code: int | None,
                  test_verdict: str = "none", verifier_verdict: str = "handoff",
                  verifier_obj: dict | None = None, roles: dict | None = None,
-                 repo: Path | None = None) -> Path:
+                 repo: Path | None = None, pr_url: str | None = None) -> Path:
     repo_sha = git(repo, "rev-parse", "HEAD").stdout.strip() if repo else ""
     skill_sha = git(repo, "rev-parse", "HEAD:.claude/skills").stdout.strip() if repo else ""
     roles = roles or {}
@@ -756,6 +758,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
         "repo_sha": repo_sha or None,
         "skill_sha": skill_sha or None,
         "goal_contract_sha": goal_contract_sha(task),
+        "pr_url": pr_url or None,
         "started_at": started_at,
     }
     fm_lines = "\n".join(f"{k}: {v}" for k, v in fm.items() if v is not None)
@@ -979,6 +982,182 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
     auto_commit(DATA, [md, REVIEW_NOTES], f"review: {run_id} 判断を記入し reviewed 化")
 
 
+# --- PR promotion(run=pass 後: PR 作成 → CI/Copilot が green になるまで Implementer 差し戻し) ---
+# merge は人間(種類B)。loop は green & Copilot-clean まで持っていって handoff で止める。
+
+COPILOT_BOT = "copilot-pull-request-reviewer[bot]"
+
+
+def _gh(args: list[str], cwd: Path, timeout: int = 120) -> subprocess.CompletedProcess:
+    return subprocess.run(["gh", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+
+
+def _gh_json(args: list[str], cwd: Path, default):
+    p = _gh(args, cwd)
+    try:
+        return json.loads(p.stdout) if p.stdout.strip() else default
+    except json.JSONDecodeError:
+        return default
+
+
+def _repo_slug(repo: Path) -> str:
+    return _gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], repo).stdout.strip()
+
+
+def _default_branch(repo: Path) -> str:
+    return _gh(["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"], repo).stdout.strip() or "main"
+
+
+def open_pr(repo: Path, branch: str, title: str, body: str) -> tuple[int | None, str]:
+    """branch を push して PR を作る。既存 PR があればそれを返す。"""
+    git(repo, "push", "-u", "origin", branch)
+    base = _default_branch(repo)
+    p = _gh(["pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body], repo)
+    if p.returncode == 0:
+        url = p.stdout.strip().splitlines()[-1]
+        num = url.rstrip("/").split("/")[-1]
+        return (int(num) if num.isdigit() else None), url
+    o = _gh_json(["pr", "view", branch, "--json", "number,url"], repo, {})  # 既存 PR
+    return o.get("number"), o.get("url", "")
+
+
+def request_copilot(repo: Path, slug: str, pr: int) -> None:
+    _gh(["api", "-X", "POST", f"repos/{slug}/pulls/{pr}/requested_reviewers",
+         "-f", f"reviewers[]={COPILOT_BOT}"], repo)
+
+
+def wait_ci(repo: Path, pr: int, timeout: int) -> None:
+    """CI チェックの pending が無くなるまで待つ(タイムアウトで打ち切り)。"""
+    deadline = time.monotonic() + timeout
+    grace = time.monotonic() + 30  # チェック未生成の初動猶予
+    while True:
+        checks = _gh_json(["pr", "checks", str(pr), "--json", "name,bucket"], repo, [])
+        if checks and not any(c.get("bucket") == "pending" for c in checks):
+            return
+        if not checks and time.monotonic() > grace:
+            return  # CI 無し
+        if time.monotonic() > deadline:
+            return
+        time.sleep(10)
+
+
+def collect_ci_failures(repo: Path, pr: int) -> list[dict]:
+    fails = []
+    for c in _gh_json(["pr", "checks", str(pr), "--json", "name,bucket,link"], repo, []):
+        if c.get("bucket") != "fail":
+            continue
+        m = re.search(r"runs/(\d+)", c.get("link", ""))
+        log = ""
+        if m:
+            lp = _gh(["run", "view", m.group(1), "--log-failed"], repo, timeout=120)
+            log = "\n".join(lp.stdout.splitlines()[-40:])
+        fails.append({"name": c.get("name"), "log": log})
+    return fails
+
+
+def wait_copilot(repo: Path, slug: str, pr: int, timeout: int) -> bool:
+    """Copilot のレビュー投稿(state≠PENDING)が出るまで待つ。"""
+    deadline = time.monotonic() + timeout
+    while True:
+        states = _gh_json(["api", f"repos/{slug}/pulls/{pr}/reviews",
+                           "--jq", f'[.[]|select(.user.login=="{COPILOT_BOT}")|.state]'], repo, [])
+        if any(s != "PENDING" for s in states):
+            return True
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(10)
+
+
+def collect_review_threads(repo: Path, slug: str, pr: int) -> list[dict]:
+    """Copilot の未解決 reviewThread を集める(pr-review-fix と同じ isResolved=false 基準)。"""
+    owner, name = slug.split("/", 1)
+    q = ('{repository(owner:"%s",name:"%s"){pullRequest(number:%d){reviewThreads(first:100){'
+         'nodes{id isResolved path line comments(first:1){nodes{author{login} body}}}}}}}') % (owner, name, pr)
+    data = _gh_json(["api", "graphql", "-f", f"query={q}"], repo, {})
+    nodes = (((data.get("data") or {}).get("repository") or {}).get("pullRequest") or {}).get("reviewThreads", {}).get("nodes", [])
+    out = []
+    for n in nodes:
+        if n.get("isResolved"):
+            continue
+        cs = (n.get("comments") or {}).get("nodes") or []
+        c = cs[0] if cs else {}
+        author = ((c.get("author") or {}).get("login") or "")
+        if "copilot" not in author.lower():
+            continue
+        out.append({"id": n.get("id"), "path": n.get("path"), "line": n.get("line"), "body": c.get("body", "")})
+    return out
+
+
+def resolve_thread(repo: Path, thread_id: str) -> None:
+    q = 'mutation{resolveReviewThread(input:{threadId:"%s"}){thread{isResolved}}}' % thread_id
+    _gh(["api", "graphql", "-f", f"query={q}"], repo)
+
+
+def render_promote_fix_prompt(ci_fails: list[dict], threads: list[dict]) -> str:
+    parts = ["提出した PR の CI または Copilot レビューで問題が見つかりました。あなたはこの worktree で実装を続けています。"
+             "下記をすべて解消し、再度テストを通してから完了してください。"]
+    if ci_fails:
+        parts.append("\n# CI 失敗")
+        for f in ci_fails:
+            parts.append(f"## {f['name']}\n```\n{f['log'][:1500]}\n```")
+    if threads:
+        parts.append("\n# Copilot レビュー指摘(未解決)")
+        for t in threads:
+            parts.append(f"- `{t['path']}:{t.get('line')}`: {t['body'][:500]}")
+    return "\n".join(parts)
+
+
+def promote_run(task: dict, run_id: str, run_dir: Path, repo: Path, wt: Path,
+                branch: str, cfg: dict, session_id: str | None) -> dict:
+    """run=pass の成果を PR 化し、CI + Copilot が green になるまで Implementer を --resume で回す。
+    merge はしない(green & clean → 人間が merge)。"""
+    loop, agents = cfg["loop"], cfg["agents"]
+    i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
+    slug = _repo_slug(repo)
+    title = f"{task['id']}: {str(task.get('goal', '')).strip().splitlines()[0][:60]}"
+    body = f"loop run `{run_id}` の成果(Verifier 監査 pass)。\n\n🤖 loop により自動生成。**merge は人間が判断**。"
+    pr, url = open_pr(repo, branch, title, body)
+    if not pr:
+        return {"state": "error", "detail": "PR 作成に失敗"}
+    request_copilot(repo, slug, pr)
+
+    rounds = int(loop.get("promote_rounds", 3))
+    ci_to = int(loop.get("ci_timeout_seconds", 1800))
+    cop_to = int(loop.get("copilot_timeout_seconds", 600))
+    ci_fails: list[dict] = []
+    threads: list[dict] = []
+    state, rnd = "green", 0
+    for rnd in range(rounds + 1):
+        wait_ci(repo, pr, ci_to)
+        wait_copilot(repo, slug, pr, cop_to)
+        ci_fails = collect_ci_failures(repo, pr)
+        threads = collect_review_threads(repo, slug, pr)
+        (run_dir / f"promote.round{rnd + 1}.json").write_text(
+            json.dumps({"ci_fail": [f["name"] for f in ci_fails], "threads": threads},
+                       ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"    · promote round {rnd + 1}: CI fail={len(ci_fails)} / Copilot 未解決={len(threads)}")
+        if not ci_fails and not threads:
+            state = "green"
+            break
+        if rnd >= rounds:
+            state = "exhausted"
+            break
+        run_role("implementer", render_promote_fix_prompt(ci_fails, threads), wt, cfg,
+                 agents["implementer_model"], i_tools, run_dir, resume_session=session_id)
+        git(wt, "add", "-A")  # commit_worktree はステージ済み前提
+        if not commit_worktree(wt, f"loop promote {run_id} round {rnd + 1}"):
+            print("    · promote: 修正による変更なし → 打ち切り(handoff)")
+            state = "no-change"
+            break
+        git(repo, "push", "origin", branch)
+        for t in threads:  # 対応したスレッドを resolve(再レビューで再提起され得る)
+            if t.get("id"):
+                resolve_thread(repo, t["id"])
+        request_copilot(repo, slug, pr)
+    return {"state": state, "pr_url": url, "pr_number": pr, "rounds": rnd + 1,
+            "ci_fail": [f["name"] for f in ci_fails], "copilot_unresolved": len(threads)}
+
+
 # --- コマンド ---
 
 def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[str, bool]:
@@ -1064,13 +1243,26 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
         committed = commit_worktree(wt, f"loop run {run_id} → {final}")
 
+        # 6) promote: pass なら PR 化し CI + Copilot が green になるまで Implementer を差し戻し(種類A)。
+        promote_info = None
+        if final == "pass" and loop.get("promote_on_pass") and committed:
+            write_run_status(run_id=run_id, phase="promote")
+            print("  · promote: PR 提出 → CI/Copilot 対応 …")
+            promote_info = promote_run(task, run_id, run_dir, repo, wt, branch, cfg, session_id)
+            (run_dir / "promote.json").write_text(
+                json.dumps(promote_info, ensure_ascii=False, indent=2), encoding="utf-8")
+            if promote_info.get("state") != "green":  # green にできず → 人間へ(死角を作らない)
+                final = "handoff"
+            print(f"  · promote: {promote_info.get('state')} / PR {promote_info.get('pr_url')}")
+
         roles = {}
         for r in ("implementer", "verifier"):
             p = run_dir / f"{r}.result.json"
             roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
         md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
-                          test_verdict, verifier_verdict, verifier_obj, roles, repo=repo)
+                          test_verdict, verifier_verdict, verifier_obj, roles, repo=repo,
+                          pr_url=(promote_info or {}).get("pr_url"))
         _finalize_run(task, run_id, run_dir, md, final, f"run: {run_id} → {final}")
 
         print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
