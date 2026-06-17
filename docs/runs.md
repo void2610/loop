@@ -29,6 +29,10 @@ runs/<id>.md 生成 → status 更新 → SQLite upsert → data repo へ auto-c
 結果(`structured_output` / `total_cost_usd` / `num_turns` / `session_id` 等)を復元する。
 差し戻し(revise)は `session_id` を `--resume` に渡し、Implementer が実装時の文脈を保持したまま再実装する。
 
+各役には **同一 repo の過去 run の客観的事実ブリーフ**(`build_repo_brief`、`repo_history_runs` 件)も注入する:
+過去に exit0 で通った検証コマンド / 失敗の事実 / 直近 verdict 台帳(アーカイブ run は除外)。**人間の判断は含めない**
+(学び・review-notes はメタループ専用)。run が貯まるほど、その repo に対する新インスタンスの習熟が上がる。
+
 ## verdict 合成
 
 `test_verdict ∈ {pass, fail, none}`(none = `verify` 未指定)、`verifier_verdict ∈ {pass, fail, revise, handoff}`。

@@ -47,7 +47,7 @@ verdict の妥当性・信用度・学びは人間が空欄に書く。
 | **Skills** | `.claude/skills/`(SKILL.md / task-author)。runner は skill_sha を run に記録 |
 | **Sub-agents** | Author(プラン)→ Implementer → Verifier の分離。Verifier は別モデル必須。revise は Implementer を `--resume` で差し戻し |
 | **Connectors** | ローカル FS / git / shell。証拠はローカルテスト実行から。promote 時は GitHub(PR / CI / Copilot レビュー) |
-| **Memory** | `runs/*.md` + 証拠 + `review-notes.md` + SKILL.md(=契約)。SQLite/DuckDB はその派生 |
+| **Memory** | `runs/*.md` + 証拠 + `review-notes.md` + SKILL.md(=契約)。SQLite/DuckDB はその派生。**過去 run の客観的事実(同一 repo で通った検証コマンド・直近 verdict・失敗事実)を Author/Implementer/Verifier に自動注入**(種類A)し、回すほど repo に習熟する。**人間の判断(学び/review-notes)はエージェントに渡さない**=メタループ(人間が skill/ゲート/契約を改善する燃料) |
 
 ## 公開エンジン / 非公開データ
 
