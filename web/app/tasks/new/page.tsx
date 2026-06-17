@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
+import { PageHeader } from "@/components/page-header";
 import { GenerateForm } from "@/components/tasks/GenerateForm";
 import { useMeta } from "@/components/tasks/useMeta";
 
@@ -11,21 +13,18 @@ export default function NewTaskPage() {
 
   return (
     <div className="space-y-5">
-      <p>
-        <Link href="/tasks" className="text-sm text-muted-foreground underline">
-          ← タスク一覧
-        </Link>
-      </p>
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          新規タスクをプロンプトから作成
-        </h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          やりたいことを自然言語で書いてください。専用 skill を付けて Claude Code に依頼し、
-          検証可能な目標契約(goal / accept / verify / constraints / allowed_tools)へ変換します。
-          生成後に内容を確認・修正できます。
-        </p>
-      </div>
+      <Link
+        href="/tasks"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" aria-hidden />
+        タスク一覧
+      </Link>
+
+      <PageHeader
+        title="新規タスク(プロンプト)"
+        description="やりたいことを自然言語で。専用 skill を付けて Claude Code に依頼し、検証可能な目標契約(goal / accept / verify / constraints / allowed_tools)へ変換します。生成後に内容を確認・修正できます。"
+      />
 
       {loading && <p className="text-sm text-muted-foreground">読み込み中…</p>}
       {error && (
@@ -33,7 +32,11 @@ export default function NewTaskPage() {
           {error}
         </p>
       )}
-      {meta && <GenerateForm repos={meta.repos} />}
+      {meta && (
+        <div className="surface max-w-3xl p-5">
+          <GenerateForm repos={meta.repos} />
+        </div>
+      )}
     </div>
   );
 }
