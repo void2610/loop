@@ -9,9 +9,29 @@ run:
 review:
     uv run runner.py review
 
-# Web GUI(編集面)で run を triage し、判断・review-notes をフォームから契約ファイルへ書く
+# バックエンド(FastAPI: /api + /legacy)のみ起動。:8765
 web:
     uv run webapp/main.py
+
+# フロント(Next.js)を本番ビルド。standalone に static を同梱する
+web-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd web
+    pnpm install
+    pnpm build
+    cp -r .next/static .next/standalone/.next/static
+    [ -d public ] && cp -r public .next/standalone/public || true
+    echo "frontend build 完了(.next/standalone)"
+
+# フロントをビルドし、backend(:8765)と frontend(:3000)を同時起動。Ctrl-C で両方停止
+app: web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "起動: backend http://127.0.0.1:8765  /  frontend http://127.0.0.1:3000  (Ctrl-C で停止)"
+    trap 'kill 0' EXIT INT TERM
+    uv run webapp/main.py &
+    PORT=3000 node web/.next/standalone/server.js
 
 # 読み取り専用 TUI(別ビュー / 残置)。判断は nvim 着地で書く
 tui:
