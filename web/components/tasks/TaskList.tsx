@@ -36,12 +36,13 @@ export function TaskList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false); // 新タスク出現 or 安全弁で生成中表示を終える
+  const [includeArchived, setIncludeArchived] = useState(false);
   const baseline = useRef<number | null>(null); // 初回件数。件数増 = 新タスク出現
   const genActive = generating && !done;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (archived: boolean) => {
     try {
-      const res = await api.listTasks();
+      const res = await api.listTasks({ include_archived: archived || undefined });
       setTasks(res.tasks);
       setLast(res.last);
       setRunning(res.running);
@@ -56,19 +57,19 @@ export function TaskList() {
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(includeArchived);
+  }, [load, includeArchived]);
 
   // 生成中は 3s ごとにポーリング。安全弁として最大 120s で打ち切る(生成は通常数十秒)。
   useEffect(() => {
     if (!genActive) return;
-    const iv = setInterval(() => void load(), 3000);
+    const iv = setInterval(() => void load(includeArchived), 3000);
     const to = setTimeout(() => setDone(true), 120000);
     return () => {
       clearInterval(iv);
       clearTimeout(to);
     };
-  }, [genActive, load]);
+  }, [genActive, includeArchived, load]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">読み込み中…</p>;
@@ -95,6 +96,18 @@ export function TaskList() {
           ● run 実行中(data/.run.lock)。完了まで新規実行は待機されます。
         </p>
       )}
+
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={includeArchived}
+          onChange={(e) => {
+            baseline.current = null;
+            setIncludeArchived(e.target.checked);
+          }}
+        />
+        アーカイブ済みも表示
+      </label>
 
       <Table>
         <TableHeader>
@@ -160,9 +173,9 @@ export function TaskList() {
                       <RunTaskButton
                         taskId={t.id}
                         disabled={running}
-                        onStarted={() => void load()}
+                        onStarted={() => void load(includeArchived)}
                       />
-                      <ArchiveTaskButton taskId={t.id} archived={!!t.archived} onChanged={() => void load()} />
+                      <ArchiveTaskButton taskId={t.id} archived={!!t.archived} onChanged={() => void load(includeArchived)} />
                     </div>
                   </TableCell>
                 </TableRow>
