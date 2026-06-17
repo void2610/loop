@@ -28,7 +28,9 @@ def list_tasks(include_archived: bool = False):
             id=tid, goal=t.get("goal"), status=t.get("status", "todo"),
             repo=t.get("repo"), archived=archived, last_run=last.get(tid)))
     return schemas.TaskListResponse(
-        tasks=tasks, last=last, running=(runner.DATA / ".run.lock").exists())
+        tasks=tasks, last=last,
+        running=(runner.DATA / ".run.lock").exists(),
+        generating=(runner.DATA / ".gen.lock").exists())
 
 
 @router.get("/repos", response_model=schemas.ReposResponse)

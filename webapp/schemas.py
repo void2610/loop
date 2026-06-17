@@ -89,6 +89,7 @@ class TaskListResponse(BaseModel):
     tasks: list[TaskRow]
     last: dict[str, LastRun]
     running: bool
+    generating: bool = False
 
 
 class TaskFields(BaseModel):

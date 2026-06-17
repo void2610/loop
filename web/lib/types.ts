@@ -1224,6 +1224,11 @@ export interface components {
             };
             /** Running */
             running: boolean;
+            /**
+             * Generating
+             * @default false
+             */
+            generating: boolean;
         };
         /** TaskRow */
         TaskRow: {

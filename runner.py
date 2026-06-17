@@ -552,41 +552,48 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int
     repo を明示指定したら(空/None 以外)モデル推定を上書きする('default' は repo 省略=デフォルト)。"""
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
-    print("▶ タスク生成中 …")
-    obj = generate_task(prompt, cfg)
-    if not isinstance(obj, dict) or not obj.get("id") or not obj.get("goal"):
-        print("生成に失敗しました(モデル出力が不正)。")
-        return 1
-    base = _safe_task_id(obj["id"])
-    tid, n = base, 2
-    while (TASKS_DIR / f"{tid}.md").exists():
-        tid, n = f"{base}-{n}", n + 1
-    fm: dict = {"id": tid, "goal": str(obj.get("goal", "")).strip("\n")}
-    acc = [str(x).strip() for x in (obj.get("accept") or []) if str(x).strip()]
-    if acc:
-        fm["accept"] = acc
-    verify = str(obj.get("verify", "") or "").strip("\n")
-    if verify:
-        fm["verify"] = verify
-    cons = [str(x).strip() for x in (obj.get("constraints") or []) if str(x).strip()]
-    if cons:
-        fm["constraints"] = cons
-    at = str(obj.get("allowed_tools", "") or "").strip()
-    if at:
-        fm["allowed_tools"] = at
-    ma = obj.get("max_attempts")
-    if isinstance(ma, int) and ma > 0:
-        fm["max_attempts"] = ma
-    fm["status"] = "todo"
-    if repo:  # 明示選択を優先(モデル推定を上書き)
-        if repo == "default":
-            fm.pop("repo", None)
-        else:
-            fm["repo"] = repo
-    p = write_task(tid, fm, str(obj.get("notes", "") or ""))
-    auto_commit(DATA, [p], f"todo: {tid} をプロンプトから生成")
-    print(f"  · 生成: {tid}")
-    if auto_run:
+    # 生成中であることを Web が決定論的に検出するためのロック(完了で必ず外す)。
+    gen_lock = DATA / ".gen.lock"
+    gen_lock.write_text(prompt[:300], encoding="utf-8")
+    tid = None
+    try:
+        print("▶ タスク生成中 …")
+        obj = generate_task(prompt, cfg)
+        if not isinstance(obj, dict) or not obj.get("id") or not obj.get("goal"):
+            print("生成に失敗しました(モデル出力が不正)。")
+            return 1
+        base = _safe_task_id(obj["id"])
+        tid, n = base, 2
+        while (TASKS_DIR / f"{tid}.md").exists():
+            tid, n = f"{base}-{n}", n + 1
+        fm: dict = {"id": tid, "goal": str(obj.get("goal", "")).strip("\n")}
+        acc = [str(x).strip() for x in (obj.get("accept") or []) if str(x).strip()]
+        if acc:
+            fm["accept"] = acc
+        verify = str(obj.get("verify", "") or "").strip("\n")
+        if verify:
+            fm["verify"] = verify
+        cons = [str(x).strip() for x in (obj.get("constraints") or []) if str(x).strip()]
+        if cons:
+            fm["constraints"] = cons
+        at = str(obj.get("allowed_tools", "") or "").strip()
+        if at:
+            fm["allowed_tools"] = at
+        ma = obj.get("max_attempts")
+        if isinstance(ma, int) and ma > 0:
+            fm["max_attempts"] = ma
+        fm["status"] = "todo"
+        if repo:  # 明示選択を優先(モデル推定を上書き)
+            if repo == "default":
+                fm.pop("repo", None)
+            else:
+                fm["repo"] = repo
+        p = write_task(tid, fm, str(obj.get("notes", "") or ""))
+        auto_commit(DATA, [p], f"todo: {tid} をプロンプトから生成")
+        print(f"  · 生成: {tid}")
+    finally:
+        gen_lock.unlink(missing_ok=True)  # 生成中表示は必ず解除
+    if auto_run and tid:
         return cmd_run(tid)
     return 0
 

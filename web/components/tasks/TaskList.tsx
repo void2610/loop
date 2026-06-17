@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
@@ -26,19 +26,17 @@ function verdictVariant(v: string | null | undefined): VerdictVariant {
 }
 
 export function TaskList() {
-  // 生成直後(GenerateForm から ?generating=1 で遷移)はポーリングして新タスク出現を待つ。
-  // genActive は useState で初期化せず searchParams から毎レンダー導出する
-  // (静的ページの hydration 時に useSearchParams が未取得=false を掴む罠を避ける)。
-  const generating = useSearchParams().get("generating") === "1";
+  // 生成中判定は API の generating(= data/.gen.lock の有無)を唯一の真実にする。
+  // URL の ?generating=1 は初回バナーの即時表示シードのみ(ロックが出るまでの一瞬を埋める)。
+  const urlGenerating = useSearchParams().get("generating") === "1";
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [last, setLast] = useState<Record<string, LastRun>>({});
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false); // 新タスク出現 or 安全弁で生成中表示を終える
   const [includeArchived, setIncludeArchived] = useState(false);
-  const baseline = useRef<number | null>(null); // 初回件数。件数増 = 新タスク出現
-  const genActive = generating && !done;
+  const [generating, setGenerating] = useState(urlGenerating);
+  const genActive = generating;
 
   const load = useCallback(async (archived: boolean) => {
     try {
@@ -46,9 +44,8 @@ export function TaskList() {
       setTasks(res.tasks);
       setLast(res.last);
       setRunning(res.running);
+      setGenerating(res.generating); // gen ロックが外れたら必ず false になる(stuck しない)
       setError(null);
-      if (baseline.current === null) baseline.current = res.tasks.length;
-      else if (res.tasks.length > baseline.current) setDone(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "タスク一覧の取得に失敗しました");
     } finally {
@@ -60,16 +57,12 @@ export function TaskList() {
     void load(includeArchived);
   }, [load, includeArchived]);
 
-  // 生成中は 3s ごとにポーリング。安全弁として最大 120s で打ち切る(生成は通常数十秒)。
+  // 生成中(gen ロック有り)の間だけ 3s ポーリング。ロックが外れれば次の poll で停止する。
   useEffect(() => {
-    if (!genActive) return;
+    if (!generating) return;
     const iv = setInterval(() => void load(includeArchived), 3000);
-    const to = setTimeout(() => setDone(true), 120000);
-    return () => {
-      clearInterval(iv);
-      clearTimeout(to);
-    };
-  }, [genActive, includeArchived, load]);
+    return () => clearInterval(iv);
+  }, [generating, includeArchived, load]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">読み込み中…</p>;
@@ -103,10 +96,7 @@ export function TaskList() {
             type="checkbox"
             className="accent-primary"
             checked={includeArchived}
-            onChange={(e) => {
-              baseline.current = null;
-              setIncludeArchived(e.target.checked);
-            }}
+            onChange={(e) => setIncludeArchived(e.target.checked)}
           />
           アーカイブ済みも表示
         </label>
