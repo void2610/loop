@@ -32,14 +32,13 @@
 ```
 engine(このリポジトリ / public):
   loop.toml            [loop]/[agents]/[repo]/[repos]/[data]
-  runner.py            一本道ランナー: 3役 / retry / 生成(gen) / status / archive(種類A)
+  runner.py            一本道ランナー: Implementer/Verifier / revise / 生成(gen) / status / archive(種類A)
   loopdb.py            SQLite インデックス層(MD 派生・再生成可能)
   webapp/
-    main.py            ASGI 組み立て(痩せた層)。/api(JSON+SSE) と /legacy(Jinja) を載せる
+    main.py            ASGI 組み立て(痩せた層)。/api(JSON+SSE)のみ
     api/*.py           JSON API(router 自動収集)。runs / tasks / monitor / stats / dispatch / meta
-    legacy.py + templates/  旧 Jinja UI(退避・原則無改造)
     auth.py schemas.py util.py
-  web/                 Next.js(App Router)+ TS + Tailwind + shadcn/ui = メイン UI
+  web/                 Next.js(App Router)+ TS + Tailwind + shadcn/ui = 唯一の UI
   stats.py + queries/  DuckDB 分析
   .claude/skills/      SKILL.md / task-author(プロンプト→目標契約の生成スキル)
   docs/                公開ドキュメント
@@ -54,10 +53,10 @@ data/(別 private repo / engine からは .gitignore):
 
 ---
 
-## 3. 2 つの Web UI(重要)
+## 3. Web UI
 
-- **Next.js(`web/`)= メイン UI**。`/runs` `/tasks` `/monitor` `/dashboard` ほか。今後の UI 改善はここ。
-- **legacy Jinja(`webapp/templates/`)= 退避・無改造**。`/legacy/*`。**ユーザー指示が無い限り触らない**(本人の明示方針)。legacy には旧「削除」ボタンが残るが、それも触らない。
+- **Next.js(`web/`)= 唯一の UI**。`/runs` `/tasks` `/dashboard` ほか。UI 改善はここ。
+- **legacy Jinja は撤去済み**(`webapp/legacy.py` / `webapp/templates/` を削除、`/legacy/*` 廃止。2026-06-17)。FastAPI は `/api/*` のみ供給。`/`(:8765 直叩き)は Next フロントへリダイレクト。
 - FastAPI は `/api/*`(JSON + SSE)を出し、Next が `next.config.ts` の rewrite で `/api/*` を `:8765` の uvicorn へプロキシ(単一オリジン)。SSE はブラウザ→FastAPI 直 + CORS。
 
 ---
@@ -73,7 +72,7 @@ data/(別 private repo / engine からは .gitignore):
 - `--max-budget-usd` の支出は 2026/6/15 以降、対話枠ではなく Agent SDK クレジットから引かれる。サブスク型の枯渇は budget では守れないので turn+wall-clock 併用に意味がある。
 - **生成(`runner gen`)**は「実行せず変換せよ」を明示し turn 上限を小さく(8)している。これを緩めると遅くなる。
 - **Next は `output: standalone`**。`next start` は警告を出す(静的が欠ける恐れ)。本番起動は `node .next/standalone/server.js` で、`just web-build` が `.next/static` を standalone へコピーする。
-- **webapp は Python 3.12 ピン**(jinja が 3.14 で壊れるため)。runner 等は 3.14 で可。Starlette の `TemplateResponse` は新シグネチャ(`request` 第1引数)。
+- **webapp は Python 3.12 ピン**(元は jinja が 3.14 で壊れるため。jinja/legacy 撤去済みだが保守的に据置。上げるなら fastapi/uvicorn の 3.14 動作確認が要る)。runner 等は 3.14 で可。
 - macOS には `setsid` が無い。`just app` の `trap 'kill 0'` は**同一プロセスグループの呼び出しシェルまで巻き込む**ので、検証時は `run_in_background` で別ツリーに起動する。
 
 ---
@@ -82,7 +81,7 @@ data/(別 private repo / engine からは .gitignore):
 
 ```
 just app          # フロントを build → backend(:8765)+ frontend(:3000)同時起動。/api は rewrite で 8765 へ
-just web          # backend(/api + /legacy)のみ
+just web          # backend(/api + SSE)のみ
 just web-build    # フロント本番ビルド(standalone に static 同梱)
 ```
 
@@ -117,6 +116,6 @@ just web-build    # フロント本番ビルド(standalone に static 同梱)
 - ユーザーは専門家。指摘は正しい前提で受ける(グローバル規約)。`?`/`？` 終わりは**質問**なので副作用を出さず回答だけ、`!`/`！` は急ぎで正確に実行。
 - **実装方針が分岐し、ユーザーの判断が要る所は AskUserQuestion で確認**してから作る(例: 公開/非公開の分け方、複数 repo 方式)。逆に既定が明らかなら決めて進め、何を選んだか述べる。
 - **やり切る。** バックエンド→API→UI まで通す。検証は実際に動かして証拠で示す(curl の HTTP コード、build 成功、ライブ run の verdict)。「たぶん動く」で終えない。
-- **既存の不変条件を毎回守る**: 削除を作らない / GUI に判断を生成させない / read-only 役の `--disallowedTools` / 種類B は人間 / file-based contract / legacy 不改造。
+- **既存の不変条件を毎回守る**: 削除を作らない / GUI に判断を生成させない / read-only 役の `--disallowedTools` / 種類B は人間 / file-based contract。
 - UI 改善は `ui-ux-pro-max` skill の指針 + 既存基調(`.surface` / `PageHeader` / `th-label` / lucide アイコン / dark トークン)に合わせる。アーカイブはアイコンのみ・hover で赤。
 - これまでの主要な拡張順: 計測配管 → SQLite/DuckDB/TUI → Web 編集面 → 公開/非公開分離 → 3役 Sub-agents → retry → 多ファイルタスク → プロンプト生成 → 複数 repo → 監視/ライブ transcript → アーカイブ → JSON API + Next 全面刷新 → UI 統一。次の改善もこの一貫性の上に積む。

@@ -1,4 +1,4 @@
-"""REST / SSE / legacy が共有する純関数ユーティリティ。
+"""REST / SSE が共有する純関数ユーティリティ。
 
 ここに置くのは「事実の変換」だけ。判断の生成・要約・補完は一切しない(§2.0-1)。
 _safe_id・evidence のパストラバーサル防御は移行後も緩めない(§2.4)。
@@ -178,7 +178,7 @@ def evidence_flags(run_id: str) -> dict:
 
 
 def evidence_text(run_id: str) -> dict:
-    """証拠ファイル本文を JSON へ詰める(legacy detail 互換)。"""
+    """証拠ファイル本文を JSON へ詰める。"""
     d = RUNS / run_id
     out: dict = {}
     for name in ("change.patch", "test-output.txt"):
@@ -221,7 +221,7 @@ def evidence_file_path(run_id: str, name: str) -> Path | None:
 
 
 def parse_transcript(path: Path) -> list[dict]:
-    """セッション JSONL を会話イベント列に畳む(user/assistant のみ)。REST/SSE/legacy 共有。"""
+    """セッション JSONL を会話イベント列に畳む(user/assistant のみ)。REST/SSE 共有。"""
     events: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()

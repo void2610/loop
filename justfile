@@ -9,7 +9,7 @@ run:
 review:
     uv run runner.py review
 
-# バックエンド(FastAPI: /api + /legacy)のみ起動。:8765
+# バックエンド(FastAPI: /api + SSE)のみ起動。:8765
 web:
     uv run webapp/main.py
 
