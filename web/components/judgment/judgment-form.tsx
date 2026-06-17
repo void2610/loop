@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useImperativeHandle, useRef, useState, forwardRef } from "react";
+import { SquarePen } from "lucide-react";
 
 import { api, ApiError, type JudgmentInput } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -84,19 +86,20 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
         e.preventDefault();
         void save();
       }}
-      className="flex h-full flex-col gap-3"
+      className="surface flex h-full flex-col gap-3 p-4"
     >
-      <div>
-        <h3 className="text-base font-semibold">
-          判断{" "}
-          <span className="font-normal text-muted-foreground">
-            (種類B / あなたが書く。GUI は生成・提案しない)
+      <div className="flex items-start justify-between gap-2 border-b border-border/60 pb-3">
+        <div className="flex items-center gap-2">
+          <SquarePen className="size-4 text-primary" aria-hidden />
+          <h3 className="text-sm font-semibold">判断</h3>
+          <span className="text-xs text-muted-foreground">
+            種類B / あなたが書く・GUI は生成しない
           </span>
-        </h3>
+        </div>
         {savedReviewed ? (
-          <p className="mt-1 text-xs text-verdict-pass">reviewed ✓(再保存すると判断を全置換します)</p>
+          <Badge variant="pass" title="再保存すると判断を全置換します">reviewed ✓</Badge>
         ) : (
-          <p className="mt-1 text-xs text-muted-foreground">未レビュー</p>
+          <Badge variant="outline" className="text-muted-foreground">未レビュー</Badge>
         )}
       </div>
 
@@ -106,7 +109,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
             key={key}
             className={`flex min-h-0 flex-col gap-1 ${key === "learning" ? "flex-[2.2]" : "flex-1"}`}
           >
-            <Label htmlFor={`judgment-${key}`}>{label}</Label>
+            <Label htmlFor={`judgment-${key}`} className="th-label">{label}</Label>
             <Textarea
               id={`judgment-${key}`}
               name={key}
@@ -117,7 +120,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
               autoCorrect="off"
               autoCapitalize="off"
               data-1p-ignore
-              className="min-h-0 flex-1 resize-none font-mono text-sm"
+              className="min-h-0 flex-1 resize-none bg-background/40 text-sm leading-relaxed"
             />
           </div>
         ))}
