@@ -91,7 +91,8 @@ just web-build    # フロント本番ビルド(standalone に static 同梱)
 
 ## 6. コミット / push の約束
 
-- **commit / push はユーザーが言った時だけ**(「push」等)。それ以外は作業ツリーに留める。グローバル規約のコミット/ブランチ skill に従う。
+- **作業が一段落したら、明示の指示が無くても自動で commit / push する。**(「push して」を待たない。)毎回 push 可否を尋ねない。グローバル規約のコミット/ブランチ skill に従う。
+- ただし push 前に必ず `git status` を確認し、**下記の 2 repo 分離を厳守**。混入の疑いがあれば push せず手を止めて報告する(自動化より安全が優先)。
 - **2 repo を取り違えない。** 契約データの変更は `git -C data ...`、コードは engine。**data を含む履歴を public(engine)に push しない。** 過去に engine へ data/設計メモを誤って含めた事故あり(force-push で除去済み)。`backup/*` ブランチはローカル限定。
 - engine に紛れ込みやすいもの: ルート直下に置かれた `*.md`(設計メモは `data/plans/` へ)、生成物(`hello.txt` 等)、`data/`。コミット前に `git status` を確認。
 - コミットメッセージは日本語、末尾に `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`。
