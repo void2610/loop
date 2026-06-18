@@ -2109,6 +2109,47 @@ def _find_candidate(candidate_id: str) -> tuple[Path, dict] | None:
     return None
 
 
+def reject_candidate(candidate_id: str) -> bool:
+    """規範候補を reject(人間=種類B の操作の中継。CLI / Web 共用)。見つからねば False。"""
+    found = _find_candidate(candidate_id)
+    if not found:
+        return False
+    cpath, c = found
+    with _DATA_COMMIT_LOCK:
+        set_candidate_status(cpath, c["candidate_id"], "rejected")
+        reindex_norms()
+        auto_commit(DATA, [cpath], f"norms: {c['candidate_id']} を reject")
+    return True
+
+
+def promote_candidate(candidate_id: str) -> Path | None:
+    """規範候補を conventions.md へ昇格(人間=種類B の操作の中継。CLI / Web 共用)。返り値=conventions.md パス。
+    文言の統合・上書き・剪定は人間が conventions.md を直接編集して行う。見つからねば None。"""
+    found = _find_candidate(candidate_id)
+    if not found:
+        return None
+    cpath, c = found
+    conv = cpath.parent / "conventions.md"
+    promoted_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    ev = ", ".join(c.get("evidence_runs", []))
+    block = (f"\n## (昇格: {c['candidate_id']} — 見出し/文言は人間が調整)\n"
+             f"{c.get('proposed_norm', '')}\n"
+             f"- evidence_runs: [{ev}]\n"
+             f"- promoted_at: {promoted_at}\n")
+    with _DATA_COMMIT_LOCK:
+        conv.parent.mkdir(parents=True, exist_ok=True)
+        if not conv.exists() or conv.stat().st_size == 0:
+            conv.write_text(f"# {cpath.parent.name} の設計規範(承認済み・run に注入される)\n\n"
+                            "> 人間が candidates.md から昇格させた規範のみ。CLAUDE.md(憲法)に劣後する。\n",
+                            encoding="utf-8")
+        with conv.open("a", encoding="utf-8") as f:
+            f.write(block)
+        set_candidate_status(cpath, c["candidate_id"], "promoted")
+        reindex_norms()
+        auto_commit(DATA, [conv, cpath], f"norms: {c['candidate_id']} を conventions.md へ昇格")
+    return conv
+
+
 def cmd_norms(rest: list[str]) -> int:
     """規範記憶の昇格配管(種類B の人間作業の補助のみ。規範文の生成・要約・推奨はしない)。
     usage: norms [list] | promote <id> | reject <id> | draft <run_id> [--reason <text>]"""
@@ -2137,38 +2178,17 @@ def cmd_norms(rest: list[str]) -> int:
         if len(rest) < 2:
             print(f"usage: norms {action} <candidate_id>")
             return 2
-        found = _find_candidate(rest[1])
-        if not found:
+        if action == "reject":
+            if not reject_candidate(rest[1]):
+                print(f"候補が見つかりません: {rest[1]}")
+                return 1
+            print(f"  · {rest[1]} を rejected にしました。")
+            return 0
+        conv = promote_candidate(rest[1])
+        if conv is None:
             print(f"候補が見つかりません: {rest[1]}")
             return 1
-        cpath, c = found
-        if action == "reject":
-            set_candidate_status(cpath, c["candidate_id"], "rejected")
-            reindex_norms()
-            auto_commit(DATA, [cpath], f"norms: {c['candidate_id']} を reject")
-            print(f"  · {c['candidate_id']} を rejected にしました。")
-            return 0
-        # promote: proposed_norm を conventions.md へ追記 + status 更新(決定論)。
-        # 文言の統合・上書き・剪定は人間が conventions.md を直接編集して行う(将来 Web から)。
-        conv = cpath.parent / "conventions.md"
-        promoted_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-        ev = ", ".join(c.get("evidence_runs", []))
-        block = (f"\n## (昇格: {c['candidate_id']} — 見出し/文言は人間が調整)\n"
-                 f"{c.get('proposed_norm', '')}\n"
-                 f"- evidence_runs: [{ev}]\n"
-                 f"- promoted_at: {promoted_at}\n")
-        with _DATA_COMMIT_LOCK:
-            conv.parent.mkdir(parents=True, exist_ok=True)
-            if not conv.exists() or conv.stat().st_size == 0:
-                conv.write_text(f"# {cpath.parent.name} の設計規範(承認済み・run に注入される)\n\n"
-                                "> 人間が candidates.md から昇格させた規範のみ。CLAUDE.md(憲法)に劣後する。\n",
-                                encoding="utf-8")
-            with conv.open("a", encoding="utf-8") as f:
-                f.write(block)
-            set_candidate_status(cpath, c["candidate_id"], "promoted")
-            reindex_norms()
-            auto_commit(DATA, [conv, cpath], f"norms: {c['candidate_id']} を conventions.md へ昇格")
-        print(f"  · {c['candidate_id']} を promoted にし conventions.md へ追記しました。"
+        print(f"  · {rest[1]} を promoted にし conventions.md へ追記しました。"
               f"文言調整は {conv.relative_to(DATA)} を直接編集してください。")
         return 0
 
