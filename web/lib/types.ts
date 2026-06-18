@@ -197,6 +197,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/norms/{repo}/conventions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Conventions */
+        put: operations["put_conventions_api_norms__repo__conventions_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs": {
         parameters: {
             query?: never;
@@ -547,6 +564,17 @@ export interface components {
              * @default true
              */
             archived: boolean;
+        };
+        /**
+         * ConventionsInput
+         * @description 承認済み知識(conventions.md)の本文。人間が直接編集する(統合・剪定・修正)。
+         */
+        ConventionsInput: {
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /** CostTimelineResponse */
         CostTimelineResponse: {
@@ -1396,6 +1424,39 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_conventions_api_norms__repo__conventions_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConventionsInput"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

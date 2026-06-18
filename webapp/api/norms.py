@@ -26,6 +26,14 @@ def valid_candidate_id(candidate_id: str) -> str:
     return cid
 
 
+def valid_repo_name(repo: str) -> str:
+    """conventions.md の repo ディレクトリ名(英数 . _ - のみ)。パストラバーサル防御(整形でなく拒否)。"""
+    name = util.safe_id(repo)
+    if name is None:
+        raise HTTPException(400, err("bad_id", "不正な repo 名"))
+    return name
+
+
 @router.get("/norms", response_model=schemas.NormsResponse)
 def list_norms():
     view = util.norms_view()
@@ -49,4 +57,12 @@ def promote_norm(candidate_id: str = Depends(valid_candidate_id)):
 def reject_norm(candidate_id: str = Depends(valid_candidate_id)):
     if not runner.reject_candidate(candidate_id):
         raise HTTPException(404, err("not_found", f"候補が見つかりません: {candidate_id}"))
+    return Response(status_code=204)
+
+
+@router.put("/norms/{repo}/conventions", status_code=204,
+            openapi_extra={"x-loop-kind": "A(中継)"})
+def put_conventions(inp: schemas.ConventionsInput, repo: str = Depends(valid_repo_name)):
+    # 承認済み知識の更新(統合・剪定・修正)。中身は人間=種類B が書く。サーバは無変換で着地させるだけ。
+    runner.write_conventions(repo, inp.text)
     return Response(status_code=204)

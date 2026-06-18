@@ -2109,6 +2109,19 @@ def _find_candidate(candidate_id: str) -> tuple[Path, dict] | None:
     return None
 
 
+def write_conventions(repo_name: str, text: str) -> Path:
+    """承認済み知識(conventions.md)を人間の編集で上書きする(種類B の中継=統合・剪定・修正)。
+    promote は追記専用なので、重複・陳腐化した規範を磨き込む更新口はここ。中身は人間が書く(生成しない)。"""
+    d = NORMS_ROOT / _safe_repo_name(repo_name)
+    conv = d / "conventions.md"
+    body = text if (text == "" or text.endswith("\n")) else text + "\n"
+    with _DATA_COMMIT_LOCK:
+        d.mkdir(parents=True, exist_ok=True)
+        conv.write_text(body, encoding="utf-8")
+        auto_commit(DATA, [conv], f"norms: {_safe_repo_name(repo_name)} の conventions.md を人間が編集")
+    return conv
+
+
 def reject_candidate(candidate_id: str) -> bool:
     """規範候補を reject(人間=種類B の操作の中継。CLI / Web 共用)。見つからねば False。"""
     found = _find_candidate(candidate_id)

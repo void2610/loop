@@ -252,6 +252,14 @@ class NormsResponse(BaseModel):
     generated_at: str
 
 
+class ConventionsInput(BaseModel):
+    """承認済み知識(conventions.md)の本文。人間が直接編集する(統合・剪定・修正)。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = ""
+
+
 # --- 分析ダッシュボード(§5)。行形を OpenAPI 正本へ。loop.db は使い捨てレンズ ---
 # 集計は事実の提示のみ。SQL の AVG/SUM は空集合で null になりうるので各列は Optional。
 

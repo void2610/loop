@@ -31,6 +31,7 @@ import {
 
 import { getNorms } from "@/components/knowledge/server";
 import { CandidateActions } from "@/components/knowledge/CandidateActions";
+import { ConventionsEditor } from "@/components/knowledge/ConventionsEditor";
 import type { NormCandidate } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
@@ -207,16 +208,8 @@ export default async function KnowledgePage() {
                 </CardHeader>
                 <CardContent className="space-y-5">
                   <div>
-                    <h3 className="mb-2 text-sm font-semibold">現在の知識(run に注入される)</h3>
-                    {repo.has_conventions ? (
-                      <pre className="surface overflow-x-auto rounded-md p-3 text-xs leading-relaxed whitespace-pre-wrap">
-                        {repo.conventions}
-                      </pre>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        承認済みの規範はまだありません(候補を承認すると注入対象になります)。
-                      </p>
-                    )}
+                    <h3 className="mb-2 text-sm font-semibold">現在の知識(run に注入される / 編集可)</h3>
+                    <ConventionsEditor repo={repo.name} initial={repo.conventions} />
                   </div>
                   <div>
                     <h3 className="mb-2 text-sm font-semibold">候補(承認待ちの控え室・注入されない)</h3>

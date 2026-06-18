@@ -46,6 +46,7 @@ export type NormsResponse = Schemas["NormsResponse"];
 export type NormRepo = Schemas["NormRepo"];
 export type NormCandidate = Schemas["NormCandidate"];
 export type NormActivity = Schemas["NormActivity"];
+export type ConventionsInput = Schemas["ConventionsInput"];
 
 /** JSON は同一オリジン(/api/*)を Next rewrite で uvicorn へ転送する(§1.5)。 */
 const BASE = "";
@@ -197,4 +198,8 @@ export const api = {
   /** 候補を却下(人間が押す中継)。204。 */
   rejectNorm: (candidateId: string) =>
     request<void>("POST", `/norms/${encodeURIComponent(candidateId)}/reject`, { body: {} }),
+
+  /** 承認済み知識(conventions.md)を人間が編集して保存(統合・剪定・修正)。204。 */
+  putConventions: (repo: string, text: string) =>
+    request<void>("PUT", `/norms/${encodeURIComponent(repo)}/conventions`, { body: { text } }),
 };
