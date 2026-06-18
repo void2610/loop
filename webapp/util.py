@@ -39,6 +39,65 @@ def safe_id(raw: str | None) -> str | None:
     return rid
 
 
+def norms_view() -> dict:
+    """規範記憶のビュー(事実のみ)。repo ごとに conventions.md 生テキスト(=現在の知識)と
+    candidates.md の候補配列(承認待ち)を返す。MD が真実(loop.db は介さず直読み)。
+    判断(昇格/却下)は生成しない — 候補は status を含めそのまま並べるだけ(§2.6)。"""
+    repos = []
+    root = runner.NORMS_ROOT
+    if root.exists():
+        for d in sorted(p for p in root.iterdir() if p.is_dir()):
+            conv = d / "conventions.md"
+            rows = []
+            for c in runner.parse_candidates(d / "candidates.md"):
+                m = re.match(r"candidate-(.+)-\d+$", c["candidate_id"])
+                rows.append({
+                    "candidate_id": c["candidate_id"], "repo": d.name,
+                    "run_id": m.group(1) if m else (c.get("evidence_runs") or [None])[0],
+                    "status": c.get("status", "pending"),
+                    "observed_friction": c.get("observed_friction", ""),
+                    "proposed_norm": c.get("proposed_norm", ""),
+                    "drafted_at": c.get("drafted_at"),
+                })
+            repos.append({
+                "name": d.name,
+                "conventions": conv.read_text(encoding="utf-8", errors="replace") if conv.exists() else "",
+                "has_conventions": conv.exists() and conv.stat().st_size > 0,
+                "candidates": rows,
+            })
+    return {"repos": repos}
+
+
+def norms_activity(limit: int = 200) -> list[dict]:
+    """知識更新(規範起草)エージェントの動作履歴: runs/<id>/norms.json を新しい順に集約する。
+    起草が走った run のみ存在し、抽出(drafted)・空振り(empty/none_reason)・失敗(failed/error)を可観測にする。
+    再要約はしない(norms.json に runner が残した事実をそのまま運ぶ)。"""
+    out: list[dict] = []
+    if not RUNS.exists():
+        return out
+    for nj in RUNS.glob("*/norms.json"):
+        run_id = nj.parent.name
+        try:
+            obj = json.loads(nj.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        cands = obj.get("candidates") or []
+        err = obj.get("error")
+        outcome = "failed" if err else ("drafted" if cands else "empty")
+        repo, started = None, None
+        md = RUNS / f"{run_id}.md"
+        if md.exists():
+            fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8", errors="replace"))
+            repo, started = repo_label(fm.get("repo")), fm.get("started_at")
+        out.append({
+            "run_id": run_id, "repo": repo, "trigger": obj.get("trigger", ""),
+            "outcome": outcome, "drafted": len(cands),
+            "none_reason": obj.get("none_reason") or None, "error": err, "started_at": started,
+        })
+    out.sort(key=lambda r: (r.get("started_at") or "", r["run_id"]), reverse=True)
+    return out[:limit]
+
+
 def repo_label(raw) -> str:
     """repo 値を短い表示名に。none→no-repo / パス→basename / 登録名→そのまま / 未指定→default。"""
     s = "" if raw is None else str(raw).strip()

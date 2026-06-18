@@ -146,6 +146,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/norms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Norms */
+        get: operations["list_norms_api_norms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/norms/{candidate_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote Norm */
+        post: operations["promote_norm_api_norms__candidate_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/norms/{candidate_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Norm */
+        post: operations["reject_norm_api_norms__candidate_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs": {
         parameters: {
             query?: never;
@@ -686,6 +737,89 @@ export interface components {
             /** Phases */
             phases: string[][];
         };
+        /**
+         * NormActivity
+         * @description 知識更新エージェントが run ごとに起草を試みた記録(runs/<id>/norms.json 由来)。
+         */
+        NormActivity: {
+            /** Run Id */
+            run_id: string;
+            /** Repo */
+            repo?: string | null;
+            /**
+             * Trigger
+             * @default
+             */
+            trigger: string;
+            /** Outcome */
+            outcome: string;
+            /**
+             * Drafted
+             * @default 0
+             */
+            drafted: number;
+            /** None Reason */
+            none_reason?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Started At */
+            started_at?: string | null;
+        };
+        /**
+         * NormCandidate
+         * @description candidates.md の候補(承認待ちの控え室)。status は pending/promoted/rejected。
+         */
+        NormCandidate: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Repo */
+            repo?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Observed Friction
+             * @default
+             */
+            observed_friction: string;
+            /**
+             * Proposed Norm
+             * @default
+             */
+            proposed_norm: string;
+            /** Drafted At */
+            drafted_at?: string | null;
+        };
+        /** NormRepo */
+        NormRepo: {
+            /** Name */
+            name: string;
+            /**
+             * Conventions
+             * @default
+             */
+            conventions: string;
+            /**
+             * Has Conventions
+             * @default false
+             */
+            has_conventions: boolean;
+            /**
+             * Candidates
+             * @default []
+             */
+            candidates: components["schemas"]["NormCandidate"][];
+        };
+        /** NormsResponse */
+        NormsResponse: {
+            /** Repos */
+            repos: components["schemas"]["NormRepo"][];
+            /** Activity */
+            activity: components["schemas"]["NormActivity"][];
+            /** Generated At */
+            generated_at: string;
+        };
         /** PassRateResponse */
         PassRateResponse: {
             /** Generated At */
@@ -1191,6 +1325,84 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_norms_api_norms_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NormsResponse"];
+                };
+            };
+        };
+    };
+    promote_norm_api_norms__candidate_id__promote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_norm_api_norms__candidate_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

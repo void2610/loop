@@ -42,6 +42,10 @@ export type LiveRole = Schemas["LiveRole"];
 export type MetaResponse = Schemas["MetaResponse"];
 export type RunStartResult = Schemas["RunStartResult"];
 export type LastRun = Schemas["LastRun"];
+export type NormsResponse = Schemas["NormsResponse"];
+export type NormRepo = Schemas["NormRepo"];
+export type NormCandidate = Schemas["NormCandidate"];
+export type NormActivity = Schemas["NormActivity"];
 
 /** JSON は同一オリジン(/api/*)を Next rewrite で uvicorn へ転送する(§1.5)。 */
 const BASE = "";
@@ -180,4 +184,17 @@ export const api = {
     request<{ accepted: boolean }>("POST", "/tasks/generate", { body }),
 
   dispatch: () => request<RunStartResult>("POST", "/dispatch", { body: {} }),
+
+  // --- norms(知識更新エージェント)。read + 昇格/却下の中継(中身の判断は人間=種類B) ---
+
+  /** 現在の知識(conventions.md)+ 候補 + 起草エージェントの動作履歴。 */
+  norms: () => request<NormsResponse>("GET", "/norms"),
+
+  /** 候補を conventions.md へ昇格(人間が押す中継)。204。 */
+  promoteNorm: (candidateId: string) =>
+    request<void>("POST", `/norms/${encodeURIComponent(candidateId)}/promote`, { body: {} }),
+
+  /** 候補を却下(人間が押す中継)。204。 */
+  rejectNorm: (candidateId: string) =>
+    request<void>("POST", `/norms/${encodeURIComponent(candidateId)}/reject`, { body: {} }),
 };

@@ -211,6 +211,47 @@ class TaskIdResult(BaseModel):
     task_id: str
 
 
+# --- 規範記憶(知識更新エージェント)。事実の表示のみ。昇格/却下は人間操作の中継(§2.6) ---
+
+
+class NormCandidate(BaseModel):
+    """candidates.md の候補(承認待ちの控え室)。status は pending/promoted/rejected。"""
+
+    candidate_id: str
+    repo: str | None = None
+    run_id: str | None = None
+    status: str
+    observed_friction: str = ""
+    proposed_norm: str = ""
+    drafted_at: str | None = None
+
+
+class NormRepo(BaseModel):
+    name: str
+    conventions: str = ""        # conventions.md の生テキスト(= run に注入される現在の知識)
+    has_conventions: bool = False
+    candidates: list[NormCandidate] = []
+
+
+class NormActivity(BaseModel):
+    """知識更新エージェントが run ごとに起草を試みた記録(runs/<id>/norms.json 由来)。"""
+
+    run_id: str
+    repo: str | None = None
+    trigger: str = ""
+    outcome: str                 # drafted(抽出) / empty(空振り) / failed(出力不正・timeout)
+    drafted: int = 0
+    none_reason: str | None = None
+    error: str | None = None
+    started_at: str | None = None
+
+
+class NormsResponse(BaseModel):
+    repos: list[NormRepo]
+    activity: list[NormActivity]
+    generated_at: str
+
+
 # --- 分析ダッシュボード(§5)。行形を OpenAPI 正本へ。loop.db は使い捨てレンズ ---
 # 集計は事実の提示のみ。SQL の AVG/SUM は空集合で null になりうるので各列は Optional。
 
