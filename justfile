@@ -48,6 +48,10 @@ stats-sql sql:
 status:
     uv run runner.py status
 
+# API 契約テスト(inline script deps で webapp を 3.12 ピン実行。隔離 git repo で副作用を閉じる)
+test:
+    uv run tests/test_api_contract.py
+
 # 契約データの private repo を初期化(公開エンジンを clone した直後に1回)
 init-data:
     mkdir -p data/runs data/plans
