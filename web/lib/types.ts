@@ -286,6 +286,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/pr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run Pr
+         * @description awaiting-merge の run の PR 状態を gh で確認。マージ済みなら verdict を pass へ昇格(真の完了)。
+         */
+        get: operations["run_pr_api_runs__run_id__pr_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/stop": {
         parameters: {
             query?: never;
@@ -690,6 +710,22 @@ export interface components {
             avg_cost?: number | null;
             /** N */
             n?: number | null;
+        };
+        /** PrStatus */
+        PrStatus: {
+            /** Number */
+            number?: number | null;
+            /** Url */
+            url?: string | null;
+            /** State */
+            state?: string | null;
+            /**
+             * Merged
+             * @default false
+             */
+            merged: boolean;
+            /** Ci */
+            ci?: string | null;
         };
         /** ReposResponse */
         ReposResponse: {
@@ -1413,6 +1449,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_pr_api_runs__run_id__pr_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrStatus"];
+                };
             };
             /** @description Validation Error */
             422: {

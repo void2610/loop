@@ -1587,6 +1587,60 @@ def promote_run(task: dict, run_id: str, run_dir: Path, repo: Path, wt: Path,
             "ci_fail": [f["name"] for f in ci_fails], "copilot_unresolved": len(threads)}
 
 
+def _pr_ci_state(rollup: list) -> str:
+    if not rollup:
+        return "none"
+    if any(c.get("status") != "COMPLETED" for c in rollup):
+        return "pending"
+    if any(c.get("conclusion") not in ("SUCCESS", "NEUTRAL", "SKIPPED", None) for c in rollup):
+        return "fail"
+    return "pass"
+
+
+def check_pr_merge(run_id: str, cfg: dict) -> dict:
+    """awaiting-merge の run の PR 状態を gh で確認。**マージ済みなら verdict を pass へ昇格(真の完了)**。
+    返り値: {number, url, state(OPEN/MERGED/CLOSED), merged, ci}。PR が無ければ {}。"""
+    md = RUNS / f"{run_id}.md"
+    if not md.exists():
+        return {}
+    fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8"))
+    pr_url = str(fm.get("pr_url") or "").strip()
+    if not pr_url:
+        return {}
+    m = re.search(r"/pull/(\d+)", pr_url)
+    repo = _repo_from_run_md(md)
+    if not m or repo is None or not repo.is_dir():
+        return {"url": pr_url}
+    pr = int(m.group(1))
+    o = _gh_json(["pr", "view", str(pr), "--json", "state,url,mergedAt,statusCheckRollup"], repo, {})
+    state = o.get("state", "")
+    merged = state == "MERGED" or bool(o.get("mergedAt"))
+    if merged and str(fm.get("verdict")) == "awaiting-merge":
+        with _DATA_COMMIT_LOCK:  # PR マージ = 真の完了 → pass へ昇格(種類A)
+            _set_fm_key(md, "verdict", "pass")
+            _reindex_md(md)
+            auto_commit(DATA, [md], f"merge: {run_id} の PR #{pr} がマージ済み → pass 確定")
+        print(f"  · {run_id}: PR #{pr} マージ済み → verdict=pass(真の完了)")
+    return {"number": pr, "url": o.get("url") or pr_url, "state": state,
+            "merged": merged, "ci": _pr_ci_state(o.get("statusCheckRollup") or [])}
+
+
+def cmd_merges() -> int:
+    """awaiting-merge の全 run の PR を確認し、マージ済みを pass へ昇格させる sweep(headless 用)。"""
+    cfg = load_config()
+    conn = loopdb.connect(DB)
+    rows = conn.execute(
+        "SELECT run_id FROM runs WHERE verdict='awaiting-merge' AND COALESCE(archived,0)=0").fetchall()
+    conn.close()
+    if not rows:
+        print("awaiting-merge(PR マージ待ち)の run はありません。")
+        return 0
+    for r in rows:
+        st = check_pr_merge(r["run_id"], cfg)
+        print(f"  · {r['run_id']}: PR {st.get('state', '?')} / merged={st.get('merged')} / ci={st.get('ci')}")
+    return 0
+
+
 # --- 人間介入(awaiting): 止まった run へ Web から続行指示を渡す ---
 
 STOP_SIGNAL = "__STOP__"  # await_human がこの文字列を返したら人間が UI から停止を要求
@@ -1784,7 +1838,9 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
             promote_info = promote_run(task, run_id, run_dir, repo, wt, branch, cfg, session_id)
             (run_dir / "promote.json").write_text(
                 json.dumps(promote_info, ensure_ascii=False, indent=2), encoding="utf-8")
-            if promote_info.get("state") != "green":  # green にできず → 人間へ(死角を作らない)
+            if promote_info.get("state") == "green":
+                final = "awaiting-merge"  # 真の完了は人間の PR マージ後。check_pr_merge が pass へ昇格させる
+            else:  # green にできず → 人間へ(死角を作らない)
                 final = "handoff"
             print(f"  · promote: {promote_info.get('state')} / PR {promote_info.get('pr_url')}")
 
@@ -2079,10 +2135,10 @@ def main() -> int:
         return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest, repo)
     if cmd == "norms":
         return cmd_norms(sys.argv[2:])
-    table = {"reindex": cmd_reindex, "status": cmd_status}
+    table = {"reindex": cmd_reindex, "status": cmd_status, "merges": cmd_merges}
     if cmd in table:
         return table[cmd]()
-    print("unknown command: {}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|reindex|status|"
+    print("unknown command: {}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|reindex|status|merges|"
           "norms [list|promote <id>|reject <id>|draft <run_id>]]".format(cmd), file=sys.stderr)
     return 2
 

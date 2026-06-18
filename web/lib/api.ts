@@ -37,6 +37,7 @@ export type GenerateInput = Schemas["GenerateInput"];
 export type ReposResponse = Schemas["ReposResponse"];
 export type MonitorSnapshot = Schemas["MonitorSnapshot"];
 export type LiveSnapshot = Schemas["LiveSnapshot"];
+export type PrStatus = Schemas["PrStatus"];
 export type LiveRole = Schemas["LiveRole"];
 export type MetaResponse = Schemas["MetaResponse"];
 export type RunStartResult = Schemas["RunStartResult"];
@@ -135,6 +136,10 @@ export const api = {
   // 実行中/awaiting の run を停止(stopped で正常終了)。
   stopRun: (runId: string) =>
     request<void>("POST", `/runs/${encodeURIComponent(runId)}/stop`),
+
+  // awaiting-merge の run の PR 状態(マージ済みなら server 側で pass に昇格)。
+  runPr: (runId: string) =>
+    request<PrStatus>("GET", `/runs/${encodeURIComponent(runId)}/pr`),
 
   listTasks: (params?: { include_archived?: boolean }) =>
     request<TaskListResponse>("GET", "/tasks", { query: params }),

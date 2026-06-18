@@ -139,6 +139,14 @@ class MessageInput(BaseModel):
     text: str  # awaiting 中の run へ送る続行指示(人間=種類B の操作判断)
 
 
+class PrStatus(BaseModel):
+    number: int | None = None
+    url: str | None = None
+    state: str | None = None   # OPEN / MERGED / CLOSED
+    merged: bool = False
+    ci: str | None = None      # pass / fail / pending / none
+
+
 class MetaResponse(BaseModel):
     repos: list[str]
     statuses: list[str]

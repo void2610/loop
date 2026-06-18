@@ -101,6 +101,13 @@ def post_message(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
     return Response(status_code=204)
 
 
+@router.get("/runs/{run_id}/pr", response_model=schemas.PrStatus)
+def run_pr(run_id: str = Depends(valid_run_id)):
+    """awaiting-merge の run の PR 状態を gh で確認。マージ済みなら verdict を pass へ昇格(真の完了)。"""
+    st = runner.check_pr_merge(run_id, runner.load_config())
+    return schemas.PrStatus(**{k: st.get(k) for k in ("number", "url", "state", "merged", "ci")})
+
+
 @router.post("/runs/{run_id}/stop", status_code=204,
              openapi_extra={"x-loop-kind": "A(中継)"})
 def stop_run(run_id: str = Depends(valid_run_id)):

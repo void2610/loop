@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { RunStatusCard } from "@/components/monitor/RunStatusCard";
 import { useMonitorStream } from "@/components/monitor/useMonitorStream";
 
+import { MergeWaitCard } from "./MergeWaitCard";
 import { RunsFilterBar, type RunsFilter } from "./RunsFilterBar";
 import { RunsTable } from "./RunsTable";
 
@@ -28,6 +29,9 @@ export function RunsView() {
   // 人間の介入待ち(awaiting)は最優先で目立たせる。それ以外の実行中とは分ける。
   const awaitingRuns = activeRuns.filter((r) => r.phase === "awaiting");
   const runningRuns = activeRuns.filter((r) => r.phase !== "awaiting");
+  // PR マージ待ち(awaiting-merge)= 真の完了前。loop.db 由来。一覧上部に PR 状態付きで出す。
+  const mergeWaitRuns = runs.filter((r) => r.verdict === "awaiting-merge");
+  const tableRuns = runs.filter((r) => r.verdict !== "awaiting-merge");
 
   // 連打・タイプ中の古いレスポンスで新しい結果を上書きしないための世代カウンタ。
   const reqSeq = useRef(0);
@@ -129,6 +133,23 @@ export function RunsView() {
         </div>
       ) : null}
 
+      {mergeWaitRuns.length > 0 ? (
+        <div className="space-y-2 rounded-lg border border-verdict-pass/40 bg-verdict-pass/5 p-3">
+          <p className="text-sm font-semibold text-verdict-pass">
+            PR マージ待ち({mergeWaitRuns.length})— 人間が PR をマージすると run が真に完了します
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {mergeWaitRuns.map((r) => (
+              <MergeWaitCard
+                key={r.run_id}
+                run={r}
+                onMerged={() => void load(filter, includeArchived)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {notice ? (
         <p className="text-sm text-muted-foreground">{notice}</p>
       ) : null}
@@ -142,7 +163,7 @@ export function RunsView() {
         </div>
       ) : (
         <RunsTable
-          runs={runs}
+          runs={tableRuns}
           active={activeRuns}
           onChanged={() => void load(filter, includeArchived)}
         />

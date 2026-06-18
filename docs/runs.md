@@ -133,10 +133,14 @@ loop/<id> を push → PR 作成 → Copilot レビュー要求(REST)
   CI 完了待ち(gh pr checks)+ Copilot レビュー待ち(reviewThreads 出現)
   CI 失敗ログ + 未解決 Copilot スレッドを収集
   → Implementer に --resume で差し戻し → 修正 → push → resolve → 再レビュー
-CI green かつ Copilot 未解決ゼロ → handoff(人間が merge)
+CI green かつ Copilot 未解決ゼロ → verdict=awaiting-merge(真の完了は人間の PR マージ後)
 ```
 
-- **merge はしない**(結果を確定する人間の判断=種類B)。green 不達・上限超過は handoff。
+- **merge はしない**(結果を確定する人間の判断=種類B)。green でも `pass` にせず **`awaiting-merge`** で記録し、
+  プロセス・worktree は解放する(PR は GitHub に残る)。green 不達・上限超過は handoff。
+- **真の完了 = 人間が PR をマージしたとき**。`check_pr_merge`(Web の `GET /api/runs/<id>/pr` / CLI `runner.py merges`)が
+  gh で PR 状態を確認し、**マージ済みを検知したら verdict を `pass` へ昇格**(種類A)。Runs 一覧は `awaiting-merge` の run を
+  「PR マージ待ち」カードで上部に出し、PR 状態 + 「PR を開く」を表示。
 - Copilot レビュー要求は `gh pr edit --add-reviewer` が無言失敗するため REST(`requested_reviewers` に
   `copilot-pull-request-reviewer[bot]`)で行う。設定: `promote_rounds` / `ci_timeout_seconds` / `copilot_timeout_seconds`。
 
