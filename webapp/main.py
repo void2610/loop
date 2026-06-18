@@ -53,4 +53,7 @@ def root():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    # proxy_headers=False: tailscaled / Next rewrite が付ける X-Forwarded-For を信用せず
+    # request.client.host を素のソケットアドレス(常に 127.0.0.1)のままにする。
+    # これを外すと Tailnet 経由の /api/* が auth.py で「非 localhost」と誤判定され 403(§4)。
+    uvicorn.run(app, host="127.0.0.1", port=8765, proxy_headers=False)

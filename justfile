@@ -16,6 +16,7 @@ web-build:
     cd web
     pnpm install
     pnpm build
+    rm -rf .next/standalone/.next/static .next/standalone/public   # cp -r は標的既存だと static/static にネストする(非冪等)
     cp -r .next/static .next/standalone/.next/static
     [ -d public ] && cp -r public .next/standalone/public || true
     echo "frontend build 完了(.next/standalone)"
@@ -30,18 +31,26 @@ app: web-build
     PORT=3000 node web/.next/standalone/server.js
 
 # Tailnet(VPN)経由でスマホ等から http://<host>.<tailnet>.ts.net:3000 でアクセスできるよう起動する。
-# frontend を Tailscale IP のみにバインド(LAN 物理 IP には出さない)、backend は 127.0.0.1 のまま=
-# RCE 露出点(dispatch/run/generate)を Tailnet 内デバイスに限定し、接続元 127.0.0.1 で auth 素通しを維持する。
-# 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる(§7 の Bearer トークンは未設定でよい)。
+# 方式: frontend / backend とも 127.0.0.1 のまま、tailscaled を前段プロキシにする(`tailscale serve --http`)。
+#   - macOS の Application Firewall は未署名の node への外部着信を block するが、着信を受けるのは
+#     署名済み・許可済みの tailscaled なので回避できる(node 直バインドだと iPhone から届かない)。
+#   - tailscaled→localhost→backend で接続元は常に 127.0.0.1。webapp は proxy_headers=False なので
+#     X-Forwarded で汚染されず auth は loopback 素通し(§7 の Bearer は未設定でよい)。
+#   - 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる。停止後の serve 解除は `just serve-off`。
 app-tailnet: web-build
     #!/usr/bin/env bash
     set -euo pipefail
-    TSIP=$(tailscale ip -4 | head -1)
     FQDN=$(tailscale status --json | python3 -c "import sys,json;print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
+    tailscale serve --bg --http=3000 3000   # tailscaled を前段に(ALF 回避)。--bg は冪等・永続
     echo "起動: http://$FQDN:3000 (Tailnet 内のスマホ等から)  /  backend 127.0.0.1:8765  (Ctrl-C で停止)"
     trap 'kill 0' EXIT INT TERM
     uv run webapp/main.py &
-    HOSTNAME=$TSIP PORT=3000 node web/.next/standalone/server.js
+    HOSTNAME=127.0.0.1 PORT=3000 node web/.next/standalone/server.js
+
+# app-tailnet の Tailnet 公開(serve)を解除する。frontend/backend の停止は Ctrl-C で別途。
+serve-off:
+    tailscale serve --http=3000 off
+    @echo "Tailnet 公開(http://<host>:3000)を解除しました。"
 
 # 読み取り専用 TUI(別ビュー / 残置)。判断の入力は Web で行う
 tui:
