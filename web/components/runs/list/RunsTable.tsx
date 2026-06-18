@@ -69,10 +69,16 @@ export function RunsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {active.map((r) => (
+          {active.map((r) => {
+            const awaiting = r.phase === "awaiting";
+            return (
             <TableRow
               key={`active-${r.run_id}`}
-              className="cursor-pointer bg-primary/5 transition-colors hover:bg-primary/10"
+              className={
+                awaiting
+                  ? "cursor-pointer bg-verdict-handoff/10 transition-colors hover:bg-verdict-handoff/15"
+                  : "cursor-pointer bg-primary/5 transition-colors hover:bg-primary/10"
+              }
               onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}/live`)}
             >
               <TableCell>
@@ -80,10 +86,17 @@ export function RunsTable({
               </TableCell>
               <TableCell className="font-mono text-xs text-foreground/90">{r.run_id}</TableCell>
               <TableCell>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-                  実行中{r.phase ? ` · ${r.phase}` : ""}
-                </span>
+                {awaiting ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-verdict-handoff/20 px-2 py-0.5 text-xs font-semibold text-verdict-handoff">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-verdict-handoff" />
+                    人間の介入待ち
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                    実行中{r.phase ? ` · ${r.phase}` : ""}
+                  </span>
+                )}
               </TableCell>
               <TableCell className="text-muted-foreground">·</TableCell>
               <TableCell className="text-right tabular-nums" />
@@ -91,9 +104,12 @@ export function RunsTable({
               <TableCell className="font-mono text-xs text-muted-foreground">
                 {formatStarted(r.started_at)}
               </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground">ライブ →</TableCell>
+              <TableCell className="text-right text-xs text-muted-foreground">
+                {awaiting ? "指示を送る →" : "ライブ →"}
+              </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
           {runs.map((r) => (
             <TableRow
               key={r.run_id}

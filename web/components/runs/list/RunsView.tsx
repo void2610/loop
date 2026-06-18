@@ -25,6 +25,9 @@ export function RunsView() {
   const [includeArchived, setIncludeArchived] = useState(false);
   // 実行中 run は loop.db 未登録なので SSE(.run.lock 由来)から取り、一覧の上に出す。
   const { runs: activeRuns } = useMonitorStream();
+  // 人間の介入待ち(awaiting)は最優先で目立たせる。それ以外の実行中とは分ける。
+  const awaitingRuns = activeRuns.filter((r) => r.phase === "awaiting");
+  const runningRuns = activeRuns.filter((r) => r.phase !== "awaiting");
 
   // 連打・タイプ中の古いレスポンスで新しい結果を上書きしないための世代カウンタ。
   const reqSeq = useRef(0);
@@ -101,11 +104,25 @@ export function RunsView() {
         onDispatch={onDispatch}
       />
 
-      {activeRuns.length > 0 ? (
+      {awaitingRuns.length > 0 ? (
+        <div className="space-y-2 rounded-lg border border-verdict-handoff/50 bg-verdict-handoff/5 p-3">
+          <p className="flex items-center gap-2 text-sm font-semibold text-verdict-handoff">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-verdict-handoff" />
+            人間の介入待ち({awaitingRuns.length})— クリックして続行指示を送ってください
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {awaitingRuns.map((r) => (
+              <RunStatusCard key={r.run_id} run={r} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {runningRuns.length > 0 ? (
         <div className="space-y-2">
           <p className="th-label">実行中(クリックでライブ)</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            {activeRuns.map((r) => (
+            {runningRuns.map((r) => (
               <RunStatusCard key={r.run_id} run={r} />
             ))}
           </div>

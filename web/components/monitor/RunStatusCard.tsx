@@ -51,9 +51,16 @@ function PhaseStepper({ phase }: { phase?: string }) {
 }
 
 export function RunStatusCard({ run }: { run: RunStatus }) {
+  const awaiting = run.phase === "awaiting";
   return (
     <Link href={`/runs/${encodeURIComponent(run.run_id)}/live`} className="block">
-      <Card className="transition-colors hover:border-primary">
+      <Card
+        className={
+          awaiting
+            ? "border-verdict-handoff/60 bg-verdict-handoff/10 transition-colors hover:border-verdict-handoff"
+            : "transition-colors hover:border-primary"
+        }
+      >
         <CardHeader className="space-y-2 pb-3">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-base">{run.task ?? run.run_id}</CardTitle>
@@ -62,7 +69,14 @@ export function RunStatusCard({ run }: { run: RunStatus }) {
           <p className="font-mono text-xs text-muted-foreground">{run.run_id}</p>
         </CardHeader>
         <CardContent className="flex items-center justify-between gap-3 pt-0">
-          <PhaseStepper phase={run.phase} />
+          {awaiting ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-verdict-handoff/20 px-2.5 py-1 text-xs font-semibold text-verdict-handoff">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-verdict-handoff" />
+              人間の介入待ち — クリックして指示を送る
+            </span>
+          ) : (
+            <PhaseStepper phase={run.phase} />
+          )}
           <span className="font-mono text-sm tabular-nums text-muted-foreground">
             {fmtElapsed(run.elapsed)}
           </span>
