@@ -80,27 +80,33 @@ data/(別 private repo / engine からは .gitignore):
 - **Next は `output: standalone`**。`next start` は警告を出す(静的が欠ける恐れ)。本番起動は `node .next/standalone/server.js` で、`just web-build` が `.next/static` を standalone へコピーする。
 - **webapp は Python 3.12 ピン**(元は jinja が 3.14 で壊れるため。jinja/legacy 撤去済みだが保守的に据置。上げるなら fastapi/uvicorn の 3.14 動作確認が要る)。runner 等は 3.14 で可。
 - **Copilot レビュー要求は REST で行う**: `gh pr edit --add-reviewer "@copilot"` は**無言失敗**する。`gh api -X POST repos/{slug}/pulls/{n}/requested_reviewers -f "reviewers[]=copilot-pull-request-reviewer[bot]"` を使う。検知は `gh pr view --json reviewRequests` が **bot を出さない**ので REST `requested_reviewers`(login=`Copilot`)を見る。Copilot は要求後 ~30s でレビュー投稿(reviewThreads 化)、CI は `gh pr checks --json bucket`(pending/pass/fail)。promote はこれらを実 PR で確認済み(personal repo でも Copilot 動作)。
-- macOS には `setsid` が無い。`just app` の `trap 'kill 0'` は**同一プロセスグループの呼び出しシェルまで巻き込む**ので、検証時は `run_in_background` で別ツリーに起動する。
+- macOS には `setsid` が無い。`just app-tailnet` の `trap 'kill 0'` は**同一プロセスグループの呼び出しシェルまで巻き込む**ので、検証時は `run_in_background` で別ツリーに起動する。
 
 ---
 
 ## 5. サーバ起動・検証フロー
 
 ```
-just app          # フロントを build → backend(:8765)+ frontend(:3000)同時起動。/api は rewrite で 8765 へ
-just app-tailnet  # スマホ等から Tailnet 経由でアクセス(tailscale serve --http を前段に)
-just serve-off    # app-tailnet の Tailnet 公開(serve)を解除
+just app-tailnet  # 唯一の公式起動口。フロント build → backend(:8765)+ frontend(:3000)+ tailscaled 前段
+                  # 手元(http://127.0.0.1:3000)/ Tailnet(http://<host>.ts.net:3000)どちらからでも届く
+                  # Ctrl-C で serve も自動 off + 子プロセス kill(中途半端な状態を残さない)
 just web          # backend(/api + SSE)のみ
 just web-build    # フロント本番ビルド(standalone に static 同梱)
 ```
+
+**起動の不変条件(`app-tailnet` 内で機械的に守る)**:
+1. 起動前に `:3000 / :8765` の残存プロセスを kill(EADDRINUSE 予防)。
+2. `tailscale serve --bg` 後に **`tailscale serve status` で設定反映を検証** し、無音失敗を許さない。
+3. EXIT/INT/TERM の trap で `tailscale serve --http=3000 off` も実行 → 永続設定の中途半端を残さない。
+これらを満たさない起動方法(直接 `node` を叩く・`zsh -i -c` でラップする等)は再現しにくい failure mode を踏むので **常に `just app-tailnet` を使う**。
 
 - **ネットワーク外(スマホ等)からのアクセス = Tailscale(VPN)**。`just app-tailnet` が `tailscale serve --bg --http=3000 3000` で **tailscaled を前段プロキシ**にし、`http://<host>.<tailnet>.ts.net:3000` で Tailnet 内デバイスから届く。frontend / backend とも **127.0.0.1 のまま**(serve が前段で受ける)。経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ね、§7 の Bearer は未設定でよい。JSON も SSE も同一オリジン(next rewrite / `SSE_BASE` 空)なので追加設定なしで届く。**この2点を踏まないと「スマホから見えない」になる(実地で踏んだ)**:
   - **macOS Application Firewall が未署名 node への外部着信を block する**。`node` を直接 Tailscale IP にバインドしても iPhone から届かない(自分からは loopback で通るので気づきにくい)。**着信を署名済みの tailscaled に受けさせる**(`tailscale serve`)ことで回避する。`socketfilterfw --getglobalstate` が `State = 1` なら有効。
   - **`uvicorn` の `proxy_headers` は既定で有効**で、Next rewrite/tailscaled が付けた `X-Forwarded-For`(元クライアント=Tailscale IP)を信用し `request.client.host` を上書きする → `auth.py` が「非 localhost」と誤判定し read も **403**。**`webapp/main.py` は `proxy_headers=False` を明示**(auth.py 自身「X-Forwarded-For は信用しない」前提と一致)。serve 経由で `/knowledge` は 200 だが `/api/*` だけ 403 ならこれ。
 - ポートなし HTTPS(`https://<host>.ts.net`)にしたい場合は admin コンソールで **HTTPS Certificates を有効化**(`tailscale cert` がハングするのは未有効が原因)してから `tailscale serve --bg 3000`(HTTPS は既定)。frontend は localhost バインドのままでよい。
 
-- **`just app` を再起動するときは先にポート解放**: `lsof -ti tcp:3000 tcp:8765 | xargs kill -9`。残った `next-server` ゾンビが :3000 を握ると `EADDRINUSE` で起動失敗する。
-- **`web/` を変えたら必ず `pnpm typecheck` と `pnpm build` を通す** → `just app` 再起動で配信に反映(standalone はメモリに旧コードを保持するので再起動必須)。
+- **`just app-tailnet` を再起動するときは先にポート解放**: `lsof -ti tcp:3000 tcp:8765 | xargs kill -9`。残った `next-server` ゾンビが :3000 を握ると `EADDRINUSE` で起動失敗する。
+- **`web/` を変えたら必ず `pnpm typecheck` と `pnpm build` を通す** → `just app-tailnet` 再起動で配信に反映(standalone はメモリに旧コードを保持するので再起動必須)。
 - **API エンドポイントを足したら型再生成**: backend 起動中に `cd web && pnpm gen:types`(`/openapi.json` から `lib/types.ts`)。
 - `web/node_modules` `web/.next` は gitignore 済み。`pnpm` は nix-darwin(homebrew.nix)で導入済み。
 
@@ -120,7 +126,7 @@ just web-build    # フロント本番ビルド(standalone に static 同梱)
 
 - 1 run = 3 モデル呼び出し(Explorer haiku + Implementer sonnet + **Verifier opus**)。hello-loop 規模で **~$0.5**。生成は **~$0.05–0.1**。
 - **大きめのライブ実行・実 repo への run は、必要性とコストを一言添えて確認**してから。検証目的の最小 run は妥当。
-- **長尺タスクは background 実行**(Web の実行ボタン / `runner run <id>` を Popen)。フォアグラウンドで回すとツールのタイムアウト(例: 600s)で SIGKILL される(過去に発生)。`just app` 等は `run_in_background` で。
+- **長尺タスクは background 実行**(Web の実行ボタン / `runner run <id>` を Popen)。フォアグラウンドで回すとツールのタイムアウト(例: 600s)で SIGKILL される(過去に発生)。`just app-tailnet` 等は `run_in_background` で。
 - run が SIGKILL されても設計上はデータ損失ゼロ・バックアップ健在・決定論ゲートで安全側に倒れる(organize-downloads の中断時に確認済み)。
 
 ---
