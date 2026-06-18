@@ -31,7 +31,7 @@ web-build:
 #   - 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる。
 # 安定性: ① 残存ポートを事前掃除 ② tailscale serve は `--bg` で無音失敗しうるので **status で検証** ③ 終了
 #   時に serve を自動 off にし、設定漏れの中途半端な状態を残さない。
-app-tailnet: web-build
+app: web-build
     #!/usr/bin/env bash
     set -euo pipefail
     # 残存 next-server / uvicorn が :3000/:8765 を握ると EADDRINUSE で起動失敗する。先に掃除する

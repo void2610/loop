@@ -36,7 +36,7 @@ just init-data        # clone 直後: data/ を private git repo として初期
 
 ```sh
 just init-data                  # data/ 初期化(初回のみ)
-just app-tailnet                # 起動(http://127.0.0.1:3000 / Tailnet 内なら http://<host>.ts.net:3000)
+just app                        # 起動(http://127.0.0.1:3000 / Tailnet 内なら http://<host>.ts.net:3000)
 # あるいは CLI:
 uv run runner.py run            # 次の todo タスクを1件実行
 uv run runner.py status         # run 一覧
@@ -121,7 +121,7 @@ data/(別の private git repo / engine からは .gitignore):
 | プロンプト生成 | `uv run runner.py gen "<依頼>" [--repo <r>] [--run]` |
 | 規範候補の昇格/却下(種類B) | `uv run runner.py norms [list\|promote <id>\|reject <id>]` |
 | PR マージ待ち run の確認(マージ済み→pass 昇格) | `uv run runner.py merges` |
-| Web(フロント+バック) | `just app-tailnet`(UI: http://127.0.0.1:3000、Tailnet 内なら http://&lt;host&gt;.ts.net:3000) |
+| Web(フロント+バック) | `just app`(UI: http://127.0.0.1:3000、Tailnet 内なら http://&lt;host&gt;.ts.net:3000) |
 | backend のみ | `just web` |
 | 再インデックス | `just reindex` |
 | DuckDB 分析 | `just stats` / `just stats-sql "SELECT …"` |
