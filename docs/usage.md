@@ -46,7 +46,9 @@ repo バッジ + run_id + verdict + reviewed + cost + 開始時刻。verdict / r
   diff(色付き)、検証出力、transcript リンク。
 - 右: **判断フォーム**(信用できるか / 失敗・リスク / 自動検証に入れるべきチェック / 学び)。常に空で出る
   (GUI は判断を生成・提案しない)。submit で契約ファイルへ書き戻し → reviewed 化 → コミット → 再導出。
-- `/runs/<id>/live`: 役割ごとのイベントを会話ビューで near-real-time 表示(実行中)。
+- `/runs/<id>/live`: 役割ごとのイベントを会話ビューで near-real-time 表示(実行中)。run が `awaiting`
+  (handoff/revise 上限で人間待ち)のときは、詰まった理由と**続行指示の入力欄**が出る → 送信すると
+  同一セッションへ注入されて続行する。
 - `/runs/<id>/transcript`: 会話ビュー(プロンプト/思考/ツール/結果)。
 
 ### Tasks `/tasks`

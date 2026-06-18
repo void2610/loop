@@ -47,7 +47,9 @@ data/(別 private repo / engine からは .gitignore):
   tasks/<id>.md  tasks/plans/<id>.md(Author 生成の実装プラン)  runs/<id>.md + runs/<id>/  review-notes.md  plans/(設計メモ)  loop.db
 ```
 
-> **run の役割フロー(現行)**: `Author プラン → Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise なら Implementer を `--resume` で差し戻し)→ [promote: pass のみ]`。
+> **実行機構(現行)**: 全役は **`RoleSession`(`claude -p --input-format/--output-format stream-json` の永続双方向セッション)**で動く。one-shot(`-p <prompt>`)と `--resume` 再 spawn は撤去。追加指示(revise / 人間介入)はすべて `send()` で**同一セッションへ user メッセージ注入**に一本化。`run_role` はその単発ラッパ(Verifier 等)。
+> **人間介入(awaiting)**: handoff / revise 上限超過で run を `awaiting` にし、`runs/<id>/inbox.jsonl` の続行指示を待つ(`await_human`、`intervention_timeout_seconds`)。Web の `/runs/<id>/live` が `intervention`(詰まった理由)を出し、`POST /api/runs/<id>/message` で inbox に追記→同一セッションへ注入して続行。タイムアウトで handoff。**GUI は事実表示のみ・選択肢/判断を生成しない**。
+> **run の役割フロー(現行)**: `Author プラン → Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise / 人間介入は同一セッションへ send)→ [promote: pass のみ]`。
 > - **promote 段(`promote_on_pass`、既定 false)**: run=pass の成果を PR 化し、**GitHub CI + Copilot レビュー**が green になるまで Implementer を `--resume` で差し戻して回す(種類A)。**merge は人間(自動 merge しない)**。上限 `promote_rounds` 超過は green にせず handoff。証拠は `promote.roundN.json` / `promote.json`、PR URL は run MD の `pr_url`。実 PR で green 収束を確認済み。
 > - **Author = Explorer 統合**: 生成時に repo を read-only 調査し詳細プランを `tasks/plans/<id>.md` に出力。run 時はこのプランを Implementer に渡す(run 時 Explorer は廃止。プラン無しの手動タスクはプラン無しで Implementer 直行)。repo は常に在る前提(no-repo 分岐は撤去)。
 > - **revise ループ**: Verifier は `pass/fail/revise/handoff`。`revise` は `required_changes` を付けて Implementer に差し戻し、**同一セッションを `--resume` で継続**(前文脈保持)。回数上限 `loop.implementer_revise_rounds`(既定 2)。上限超過でも pass にせず handoff(死角を作らない)。決定論ゲートは床のまま(`test=fail → fail`、空通りテストは Verifier が revise/handoff)。
@@ -69,7 +71,7 @@ data/(別 private repo / engine からは .gitignore):
 - **`--max-turns` は実在する**が `claude --help` に出ない(バイナリに `--max-turns <turns>`)。停止条件は turn + `--max-budget-usd` + wall-clock(`threading.Timer`)の 3 段。
 - **グローバル `~/.claude/settings.json` が `Bash(*)` / `Write` / `defaultMode: auto` を許可している。** そのため headless の `--allowedTools` は**実質スコープにならない**(settings の allow が勝つ)。read-only を強制したい役(Explorer/Verifier/タスク生成)は **`--disallowedTools Write Edit MultiEdit NotebookEdit Bash`** を付ける(`runner.WRITE_TOOLS` / `read_only=True`)。この上書きが無いと生成が「依頼を実際に実行」しようとして read-only 拒否で turn を空回りし、遅くなる/副産物ファイルが出る。
 - **`--json-schema` の構造化出力は `result.structured_output` に入る**(`result` 本文は散文)。`json.loads(result["result"])` ではない。
-- **`--output-format stream-json --verbose`** の末尾 `type=="result"` イベントは従来の単発 JSON と同形(`structured_output` 等を含む)。ライブ表示はこのストリームを `runs/<id>/{role}.stream.jsonl` に逐次書いている。
+- **実行は `--input-format stream-json --output-format stream-json --verbose` の双方向**(`RoleSession`)。プロンプトは `-p <arg>` でなく **stdin に user メッセージ(`{"type":"user",...}`)を 1 行流す**。`run_turn()` は次の `type=="result"` イベントまで読み(従来の単発 JSON と同形・`structured_output` 等含む)、セッションは開いたまま次の `send()` を待てる。`close()` で stdin を EOF にして終了。ライブ表示は `runs/<id>/{role}.stream.jsonl`。
 - `--max-budget-usd` の支出は 2026/6/15 以降、対話枠ではなく Agent SDK クレジットから引かれる。サブスク型の枯渇は budget では守れないので turn+wall-clock 併用に意味がある。
 - **生成(`runner gen`)**は「実行せず変換せよ」を明示し turn 上限を小さく(8)している。これを緩めると遅くなる。
 - **Next は `output: standalone`**。`next start` は警告を出す(静的が欠ける恐れ)。本番起動は `node .next/standalone/server.js` で、`just web-build` が `.next/static` を standalone へコピーする。

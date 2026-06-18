@@ -29,6 +29,14 @@ runs/<id>.md 生成 → status 更新 → SQLite upsert → data repo へ auto-c
 結果(`structured_output` / `total_cost_usd` / `num_turns` / `session_id` 等)を復元する。
 差し戻し(revise)は `session_id` を `--resume` に渡し、Implementer が実装時の文脈を保持したまま再実装する。
 
+実行機構は全役 **`RoleSession`(`claude -p` を stream-json で双方向に開いた永続セッション)**。one-shot と
+`--resume` 再 spawn は廃止し、revise も人間介入も **同一セッションへ user メッセージを `send`** する一経路に統一。
+
+**人間介入(awaiting)**: Verifier が handoff、または revise 上限超過のとき、run を `awaiting` にして
+`runs/<id>/inbox.jsonl` の続行指示を待つ(`intervention_timeout_seconds`)。Web の `/runs/<id>/live` が
+詰まった理由(`intervention`)を表示し、`POST /api/runs/<id>/message` で指示を送ると **同一セッションへ注入して続行**
+→ 再ゲート・再監査。タイムアウトすれば handoff で確定(死角を作らない)。GUI は事実表示のみで選択肢・判断を生成しない。
+
 各役には **同一 repo の過去 run の客観的事実ブリーフ**(`build_repo_brief`、`repo_history_runs` 件)も注入する:
 過去に exit0 で通った検証コマンド / 失敗の事実 / 直近 verdict 台帳(アーカイブ run は除外)。**人間の判断は含めない**
 (学び・review-notes はメタループ専用)。run が貯まるほど、その repo に対する新インスタンスの習熟が上がる。
