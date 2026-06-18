@@ -271,9 +271,18 @@ def render_revise_prompt(task: dict, verifier_obj: dict | None) -> str:
     return "\n".join(parts)
 
 
-def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: str = "") -> str:
+def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: str = "",
+                           human_input: str = "") -> str:
     accept = "\n".join(f"- {a}" for a in (task.get("accept") or [])) or "(明示なし)"
     constraints = "\n".join(f"- {c}" for c in (task.get("constraints") or [])) or "(なし)"
+    human_section = ""
+    if human_input.strip():
+        human_section = (
+            "\n# 人間の介入(承認・決定)\n"
+            "以下は**人間(種類B)が Web から与えた指示・承認**であり、実装者の自己申告ではない(信頼してよい権威)。\n"
+            "「人間の承認が要る/ポリシー決定」という基準は、この内容に照らして満たされているか判定すること"
+            "(実装が人間の承認した内容と一致しているかは引き続き diff/ファイルで検証する)。\n"
+            f"{human_input.strip()}\n")
     return f"""あなたは独立した受け入れ判定者(Verifier)です。**実装者の自己申告を信じてはいけません。**
 受け入れ基準を 1 つずつ、下の diff と検証出力、および worktree 内の実ファイル(Read/Grep/Glob 可)に照らして検証してください。
 テストを通すためだけの gaming(本質を解かずテストを書き換える等)や、spec の部分的未達を積極的に疑ってください。
@@ -300,7 +309,7 @@ def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: 
 
 # 決定論テストの出力
 {test_output[:4000]}
-{brief}
+{human_section}{brief}
 """
 
 
@@ -592,16 +601,36 @@ def combine_verdict(test_verdict: str, verifier_verdict: str) -> str:
     return "pass"
 
 
+def _inbox_human_input(run_dir: Path) -> str:
+    """この run で人間が Web から送った続行指示/承認(inbox.jsonl)を Verifier へ渡す形に整形する。"""
+    inbox = run_dir / "inbox.jsonl"
+    if not inbox.exists():
+        return ""
+    msgs = []
+    for line in inbox.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            t = (json.loads(line).get("text") or "").strip()
+        except json.JSONDecodeError:
+            continue
+        if t:
+            msgs.append(f"- {t}")
+    return "\n".join(msgs)
+
+
 def judge_with_verifier(task: dict, wt: Path, run_dir: Path, cfg: dict,
                         diff_text: str, test_output: str, brief: str = "") -> tuple[str, dict | None]:
-    """Verifier(別モデル・read-only・構造化出力)で判定。handoff の間は冪等に再判定する。"""
+    """Verifier(別モデル・read-only・構造化出力)で判定。handoff の間は冪等に再判定する。
+    人間が介入した run では inbox の承認/指示を Verifier に渡す(実装者の自己申告ではなく人間の権威)。"""
     loop, agents = cfg["loop"], cfg["agents"]
     vmax = int(loop.get("verifier_attempts", 3))
+    human_input = _inbox_human_input(run_dir)
     verdict, obj = "handoff", None
     for vatt in range(1, vmax + 1):
         print(f"  · Verifier {'判定中' if vatt == 1 else f'再判定 {vatt}/{vmax}'} …")
         v_result, v_hint = run_role(
-            "verifier", render_verifier_prompt(task, diff_text, test_output, brief),
+            "verifier", render_verifier_prompt(task, diff_text, test_output, brief, human_input),
             wt, cfg, agents["verifier_model"], agents["verifier_tools"], run_dir,
             extra_args=["--json-schema", json.dumps(VERIFIER_SCHEMA, ensure_ascii=False)],
             read_only=True)

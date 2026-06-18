@@ -42,6 +42,10 @@ runs/<id>.md 生成 → status 更新 → SQLite upsert → data repo へ auto-c
 詰まった理由(`intervention`)を表示し、`POST /api/runs/<id>/message` で指示を送ると **同一セッションへ注入して続行**。
 GUI は事実表示のみで選択肢・判断を生成しない。
 
+**Verifier は inbox の人間回答も入力に取る**(`_inbox_human_input`)。人間の承認/指示は実装者の自己申告ではなく
+**人間=種類B の権威**なので、「人間承認が要る/ポリシー決定」系の基準はこれに照らして判定し、承認の証跡が
+worktree に残っていなくても誤 handoff しない(実装が承認内容と一致するかは引き続き diff/ファイルで検証)。
+
 各役には **同一 repo の過去 run の客観的事実ブリーフ**(`build_repo_brief`、`repo_history_runs` 件)も注入する:
 過去に exit0 で通った検証コマンド / 失敗の事実 / 直近 verdict 台帳(アーカイブ run は除外)。**人間の判断は含めない**
 (学び・review-notes はメタループ専用)。run が貯まるほど、その repo に対する新インスタンスの習熟が上がる。
