@@ -45,9 +45,11 @@ app: web-build
     fi
     FQDN=$(tailscale status --json | python3 -c "import sys,json;print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
     echo "起動: http://$FQDN:3000 (Tailnet 内のデバイスから)  /  backend 127.0.0.1:8765  (Ctrl-C で停止)"
-    # Ctrl-C / 異常終了で serve も off にする(永続設定の中途半端を残さない)。kill 0 は同一プロセスグループ
-    cleanup() { tailscale serve --http=3000 off >/dev/null 2>&1 || true; kill 0 2>/dev/null || true; }
-    trap cleanup EXIT INT TERM
+    # Ctrl-C / 異常終了で serve も off にする(永続設定の中途半端を残さない)。
+    # 注意: kill 0 は同一プロセスグループ = 自分にも SIGTERM が届く。trap を解除してから kill しないと
+    # 再帰呼び出しの無限ループに陥り、`tailscale serve off` を連打して新規 serve 設定を即削除する亡霊と化す(実地で踏んだ)
+    cleanup() { trap - INT TERM EXIT; tailscale serve --http=3000 off >/dev/null 2>&1 || true; kill 0 2>/dev/null || true; }
+    trap cleanup INT TERM EXIT
     uv run webapp/main.py &
     HOSTNAME=127.0.0.1 PORT=3000 node web/.next/standalone/server.js
 
