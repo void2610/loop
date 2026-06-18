@@ -58,7 +58,14 @@ def run_live(run_id: str = Depends(valid_run_id)):
         sp = rd / f"{key}.stream.jsonl"
         if sp.exists() and sp.stat().st_size > 0:
             roles.append(schemas.LiveRole(label=label, events=util.parse_transcript(sp)))
-    return schemas.LiveSnapshot(run_id=run_id, status=status, active=active, roles=roles)
+    intervention = None  # awaiting 中だけ存在(runner が intervention.json を置く)
+    ip = rd / "intervention.json"
+    if ip.exists():
+        try:
+            intervention = (json.loads(ip.read_text(encoding="utf-8")).get("question") or "").strip() or None
+        except (json.JSONDecodeError, OSError):
+            intervention = None
+    return schemas.LiveSnapshot(run_id=run_id, status=status, active=active, roles=roles, intervention=intervention)
 
 
 def _run_ids() -> set[str]:

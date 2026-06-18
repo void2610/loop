@@ -132,6 +132,11 @@ class LiveSnapshot(BaseModel):
     status: dict[str, Any] | None
     active: bool
     roles: list[LiveRole]
+    intervention: str | None = None  # awaiting 時、エージェントが詰まった理由(人間への問い)
+
+
+class MessageInput(BaseModel):
+    text: str  # awaiting 中の run へ送る続行指示(人間=種類B の操作判断)
 
 
 class MetaResponse(BaseModel):

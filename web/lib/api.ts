@@ -128,6 +128,10 @@ export const api = {
   runLive: (runId: string) =>
     request<LiveSnapshot>("GET", `/runs/${encodeURIComponent(runId)}/live`),
 
+  // awaiting 中の run へ続行指示を送る(inbox 経由で同一セッションへ注入)。
+  sendMessage: (runId: string, text: string) =>
+    request<void>("POST", `/runs/${encodeURIComponent(runId)}/message`, { body: { text } }),
+
   listTasks: (params?: { include_archived?: boolean }) =>
     request<TaskListResponse>("GET", "/tasks", { query: params }),
 

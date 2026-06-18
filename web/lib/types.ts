@@ -265,6 +265,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Message
+         * @description awaiting 中の run へ続行指示を渡す。inbox.jsonl に 1 行追記し、runner が同一セッションへ注入する。
+         *     指示文(中身)は人間=種類B。ここは無変換で素通すだけ。
+         */
+        post: operations["post_message_api_runs__run_id__message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analytics/pass-rate-by-skill": {
         parameters: {
             query?: never;
@@ -592,6 +613,13 @@ export interface components {
             active: boolean;
             /** Roles */
             roles: components["schemas"]["LiveRole"][];
+            /** Intervention */
+            intervention?: string | null;
+        };
+        /** MessageInput */
+        MessageInput: {
+            /** Text */
+            text: string;
         };
         /** MetaResponse */
         MetaResponse: {
@@ -1322,6 +1350,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["JudgmentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_message_api_runs__run_id__message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageInput"];
             };
         };
         responses: {

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 
@@ -80,4 +82,20 @@ def put_judgment(inp: schemas.JudgmentInput, run_id: str = Depends(valid_run_id)
     if not (util.RUNS / f"{run_id}.md").exists():
         raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
     runner.write_judgment(run_id, inp.model_dump(), runner.load_config())  # 無変換素通し
+    return Response(status_code=204)
+
+
+@router.post("/runs/{run_id}/message", status_code=204,
+             openapi_extra={"x-loop-kind": "A(中継)"})
+def post_message(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id)):
+    """awaiting 中の run へ続行指示を渡す。inbox.jsonl に 1 行追記し、runner が同一セッションへ注入する。
+    指示文(中身)は人間=種類B。ここは無変換で素通すだけ。"""
+    text = (inp.text or "").strip()
+    if not text:
+        raise HTTPException(400, err("bad_input", "text は必須です"))
+    rd = util.RUNS / run_id
+    if not rd.is_dir():
+        raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
+    with (rd / "inbox.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
     return Response(status_code=204)

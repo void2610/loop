@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
+import { InterventionPanel } from "./InterventionPanel";
 import { LiveTranscript } from "./LiveTranscript";
 
 export function RunLivePage({ runId }: { runId: string }) {
@@ -27,6 +28,7 @@ export function RunLivePage({ runId }: { runId: string }) {
         <h1 className="text-xl font-bold tracking-tight">ライブ transcript</h1>
         <p className="font-mono text-xs text-muted-foreground">{runId}</p>
       </div>
+      <InterventionPanel runId={runId} />
       <LiveTranscript runId={runId} />
     </div>
   );
