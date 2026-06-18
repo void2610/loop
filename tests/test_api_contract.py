@@ -620,5 +620,32 @@ def test_norms_rejects_bad_candidate_id(isolated_data, client):
     assert client.post("/api/norms/evil/promote").status_code == 400
 
 
+def test_norms_put_conventions_writes_and_commits(isolated_data, client):
+    _write_candidate(isolated_data, "git-test", "candidate-x-1")  # repo ディレクトリを作る
+    body = "# 知識\n統合した規範A\n"
+    assert client.put("/api/norms/git-test/conventions", json={"text": body}).status_code == 204
+    conv = isolated_data / "repo" / "git-test" / "conventions.md"
+    assert conv.read_text(encoding="utf-8") == body, "人間の編集が無変換で着地していない"
+    repo = next(r for r in client.get("/api/norms").json()["repos"] if r["name"] == "git-test")
+    assert "統合した規範A" in repo["conventions"] and repo["has_conventions"]
+    log = subprocess.run(["git", "log", "--oneline"], cwd=isolated_data,
+                         capture_output=True, text=True).stdout
+    assert "conventions" in log, "auto_commit されていない"
+
+
+def test_norms_put_conventions_creates_dir(isolated_data, client):
+    assert client.put("/api/norms/newrepo/conventions", json={"text": "x\n"}).status_code == 204
+    assert (isolated_data / "repo" / "newrepo" / "conventions.md").exists()
+
+
+def test_norms_conventions_rejects_bad_repo(isolated_data, client):
+    assert client.put("/api/norms/..evil/conventions", json={"text": "x"}).status_code == 400
+
+
+def test_norms_conventions_extra_forbidden(isolated_data, client):
+    r = client.put("/api/norms/git-test/conventions", json={"text": "x", "evil": 1})
+    assert r.status_code == 422
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
