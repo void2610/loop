@@ -49,6 +49,7 @@ def isolated_data(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "RUNS", data / "runs")
         monkeypatch.setattr(mod, "DB", data / "loop.db")
         monkeypatch.setattr(mod, "REVIEW_NOTES", data / "review-notes.md")
+        monkeypatch.setattr(mod, "NORMS_ROOT", data / "repo")
     for attr in ("DATA", "RUNS", "DB"):
         monkeypatch.setattr(util, attr, getattr(runner, attr))
     # stats は `from ..util import DB` で import 時に束縛するので個別に差し替える。
@@ -539,6 +540,84 @@ def test_analytics_does_not_synthesize_labels(isolated_data, client):
     text = client.get("/api/analytics/summary").text
     for banned in ("危険", "要改善", "推奨", "recommend"):
         assert banned not in text
+
+
+# =====================================================================
+# norms(知識更新エージェント): 閲覧 + 昇格/却下の中継
+# =====================================================================
+
+def _write_candidate(data: Path, repo_name: str, cid: str, status: str = "pending") -> Path:
+    d = data / "repo" / repo_name
+    d.mkdir(parents=True, exist_ok=True)
+    cpath = d / "candidates.md"
+    with cpath.open("a", encoding="utf-8") as f:
+        f.write(f"## {cid}\n- observed_friction: 摩擦の事実\n- proposed_norm: こう振る舞う\n"
+                f"- evidence_runs: [run-x]\n- status: {status}\n- drafted_at: 2026-06-18T10:00:00+09:00\n")
+    return cpath
+
+
+def test_norms_empty(isolated_data, client):
+    j = client.get("/api/norms").json()
+    assert j["repos"] == [] and j["activity"] == []
+
+
+def test_norms_lists_candidates_and_conventions(isolated_data, client):
+    _write_candidate(isolated_data, "git-test", "candidate-run1-1")
+    (isolated_data / "repo" / "git-test" / "conventions.md").write_text(
+        "# 現在の知識\nルールA を守る\n", encoding="utf-8")
+    repo = next(r for r in client.get("/api/norms").json()["repos"] if r["name"] == "git-test")
+    assert repo["has_conventions"] and "ルールA" in repo["conventions"]
+    c = repo["candidates"][0]
+    assert c["candidate_id"] == "candidate-run1-1" and c["status"] == "pending"
+    assert c["proposed_norm"] == "こう振る舞う"
+
+
+def test_norms_activity_drafted(isolated_data, client):
+    rd = isolated_data / "runs" / "r-act"
+    rd.mkdir()
+    (isolated_data / "runs" / "r-act.md").write_text(
+        "---\nrepo: git-test\nstarted_at: 2026-06-18T10:00:00\n---\n", encoding="utf-8")
+    (rd / "norms.json").write_text(
+        json.dumps({"trigger": "revise が発生", "candidates": [{"proposed_norm": "x"}]}), encoding="utf-8")
+    a = next(x for x in client.get("/api/norms").json()["activity"] if x["run_id"] == "r-act")
+    assert a["outcome"] == "drafted" and a["drafted"] == 1 and a["trigger"] == "revise が発生"
+
+
+def test_norms_activity_empty_and_failed(isolated_data, client):
+    for rid, payload in [
+        ("r-empty", {"trigger": "t", "candidates": [], "none_reason": "一般化できず"}),
+        ("r-fail", {"trigger": "t", "error": "起草に失敗"})]:
+        rd = isolated_data / "runs" / rid
+        rd.mkdir()
+        (rd / "norms.json").write_text(json.dumps(payload), encoding="utf-8")
+    acts = {x["run_id"]: x for x in client.get("/api/norms").json()["activity"]}
+    assert acts["r-empty"]["outcome"] == "empty" and acts["r-empty"]["none_reason"] == "一般化できず"
+    assert acts["r-fail"]["outcome"] == "failed" and acts["r-fail"]["error"] == "起草に失敗"
+
+
+def test_norms_promote_writes_conventions(isolated_data, client):
+    _write_candidate(isolated_data, "git-test", "candidate-run2-1")
+    assert client.post("/api/norms/candidate-run2-1/promote").status_code == 204
+    conv = (isolated_data / "repo" / "git-test" / "conventions.md").read_text(encoding="utf-8")
+    assert "こう振る舞う" in conv, "proposed_norm が conventions.md へ着地していない"
+    repo = next(r for r in client.get("/api/norms").json()["repos"] if r["name"] == "git-test")
+    assert repo["candidates"][0]["status"] == "promoted"
+
+
+def test_norms_reject_sets_status_no_conventions(isolated_data, client):
+    _write_candidate(isolated_data, "git-test", "candidate-run3-1")
+    assert client.post("/api/norms/candidate-run3-1/reject").status_code == 204
+    repo = next(r for r in client.get("/api/norms").json()["repos"] if r["name"] == "git-test")
+    assert repo["candidates"][0]["status"] == "rejected"
+    assert not (isolated_data / "repo" / "git-test" / "conventions.md").exists()
+
+
+def test_norms_promote_404_unknown(isolated_data, client):
+    assert client.post("/api/norms/candidate-nope-1/promote").status_code == 404
+
+
+def test_norms_rejects_bad_candidate_id(isolated_data, client):
+    assert client.post("/api/norms/evil/promote").status_code == 400
 
 
 if __name__ == "__main__":
