@@ -20,6 +20,7 @@ import {
 
 import { EvidencePanel } from "./evidence-panel";
 import { FrontMatter } from "./front-matter";
+import { PhaseBreadcrumb } from "./phase-breadcrumb";
 import { Summary } from "./summary";
 import { Verifier } from "./verifier";
 import { VerdictBadge } from "@/components/verdict-badge";
@@ -192,6 +193,12 @@ export function RunDetailView({ runId }: { runId: string }) {
           />
         </div>
       </div>
+
+      <PhaseBreadcrumb
+        runId={detail.run_id}
+        verdict={verdict}
+        prUrl={fmString(fm, "pr_url")}
+      />
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
         {/* 左: 事実(スクロール可) */}
