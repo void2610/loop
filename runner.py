@@ -6,7 +6,7 @@
 
 種類A(メカニクス)はすべてここで全自動化する: dispatch / headless 実行 / 証拠収集 /
 自動チェックポイントコミット / run MD 生成 / SQLite upsert / インデックス再生成。
-種類B(判断)は決して自動化しない。run MD の「判断」セクションは空のまま出力し、人間が nvim で書く。
+種類B(判断)は決して自動化しない。run MD の「判断」セクションは空のまま出力し、人間が Web 判断フォームで書く。
 実行系は claude -p と git worktree(ネイティブ)に委ね、ここは突き合わせ層に徹する。
 """
 
@@ -1161,7 +1161,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
     return out
 
 
-# --- review(種類B への着地。判断そのものは人間が nvim で書く) ---
+# --- review(種類B。判断そのものは人間が Web 判断フォームで書く) ---
 
 def set_md_reviewed(md: Path) -> None:
     lines = md.read_text(encoding="utf-8").splitlines()
@@ -1222,13 +1222,6 @@ def set_run_archived(run_id: str, archived: bool) -> bool:
     return True
 
 
-def judgment_line(md: Path) -> int:
-    for i, line in enumerate(md.read_text(encoding="utf-8").splitlines(), start=1):
-        if line.startswith(JUDGMENT_HEADING):
-            return i
-    return 1
-
-
 def _repo_from_run_md(md: Path) -> Path | None:
     """run MD の front-matter の repo(絶対パス文字列)を Path に戻す('none' は None)。"""
     fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8")) if md.exists() else {}
@@ -1241,7 +1234,7 @@ def _repo_from_run_md(md: Path) -> Path | None:
 def maybe_draft_on_review(run_id: str, cfg: dict) -> None:
     """トリガー3(人間レビューで verdict が覆った): run MD front-matter の human_verdict が
     runner の verdict と食い違うとき、規範候補を起草する(種類A の起草 / 覆し判断は人間=種類B)。
-    human_verdict は人間が nvim で任意に書く構造化シグナル(無ければ何もしない)。"""
+    human_verdict は人間が Web 判断フォームで任意に選ぶ構造化シグナル(無ければ何もしない)。"""
     md = RUNS / f"{run_id}.md"
     if not md.exists():
         return
@@ -1255,24 +1248,6 @@ def maybe_draft_on_review(run_id: str, cfg: dict) -> None:
                           f"人間レビューで verdict が覆った(runner={fm.get('verdict')} → human={human})")
     except Exception as ex:
         print(f"  · 規範候補: 起草中に例外(無視) {ex!r}")
-
-
-def mark_reviewed(run_id: str, cfg: dict) -> None:
-    """種類A: 判断記入後の後処理。reviewed 化 → SQLite upsert → コミット → (覆しがあれば)規範候補起草。"""
-    md = RUNS / f"{run_id}.md"
-    set_md_reviewed(md)
-    _reindex_md(md)
-    auto_commit(DATA, [md], f"review: {run_id} を reviewed 化")
-    maybe_draft_on_review(run_id, cfg)
-
-
-def unreviewed_runs() -> list[Path]:
-    out = []
-    for md in sorted(RUNS.glob("*.md")):
-        fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8"))
-        if str(fm.get("reviewed", "false")).lower() not in ("true", "1"):
-            out.append(md)
-    return out
 
 
 # --- 判断の読み書き(GUI フォーム ↔ 契約ファイル。中身は人間が書く) ---
@@ -1798,24 +1773,6 @@ def cmd_reindex() -> int:
     return 0
 
 
-def cmd_review() -> int:
-    import os
-    cfg = load_config()
-    pending = unreviewed_runs()
-    if not pending:
-        print("未レビューの run はありません。")
-        return 0
-    md = pending[0]
-    run_id = md.stem
-    editor = os.environ.get("EDITOR", "nvim")
-    print(f"▶ review: {run_id}（残り {len(pending)} 件）")
-    print(f"  · {editor} で判断セクションを開きます。保存して閉じると reviewed 化 + コミットします。")
-    subprocess.run([editor, f"+{judgment_line(md)}", str(md)])
-    mark_reviewed(run_id, cfg)
-    print(f"  · {run_id}: reviewed:true / SQLite upsert / コミット 完了")
-    return 0
-
-
 def _find_candidate(candidate_id: str) -> tuple[Path, dict] | None:
     """全 repo の candidates.md を走査して candidate_id を持つ (candidates_path, 候補dict) を返す。"""
     if not NORMS_ROOT.exists():
@@ -1830,7 +1787,6 @@ def _find_candidate(candidate_id: str) -> tuple[Path, dict] | None:
 def cmd_norms(rest: list[str]) -> int:
     """規範記憶の昇格配管(種類B の人間作業の補助のみ。規範文の生成・要約・推奨はしない)。
     usage: norms [list] | promote <id> | reject <id> | draft <run_id> [--reason <text>]"""
-    import os
     cfg = load_config()
     action = rest[0] if rest else "list"
 
@@ -1867,7 +1823,8 @@ def cmd_norms(rest: list[str]) -> int:
             auto_commit(DATA, [cpath], f"norms: {c['candidate_id']} を reject")
             print(f"  · {c['candidate_id']} を rejected にしました。")
             return 0
-        # promote: proposed_norm を conventions.md に追記 → 人間が nvim で統合・上書き・剪定 → status 更新。
+        # promote: proposed_norm を conventions.md へ追記 + status 更新(決定論)。
+        # 文言の統合・上書き・剪定は人間が conventions.md を直接編集して行う(将来 Web から)。
         conv = cpath.parent / "conventions.md"
         promoted_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         ev = ", ".join(c.get("evidence_runs", []))
@@ -1883,15 +1840,11 @@ def cmd_norms(rest: list[str]) -> int:
                                 encoding="utf-8")
             with conv.open("a", encoding="utf-8") as f:
                 f.write(block)
-        editor = os.environ.get("EDITOR", "nvim")
-        print(f"  · {c['candidate_id']} の規範案を conventions.md へ追記しました。")
-        print(f"  · {editor} で開きます。**統合・上書き・文言調整・剪定は人間が**行ってください(保存して閉じると確定)。")
-        subprocess.run([editor, str(conv)])
-        with _DATA_COMMIT_LOCK:
             set_candidate_status(cpath, c["candidate_id"], "promoted")
             reindex_norms()
             auto_commit(DATA, [conv, cpath], f"norms: {c['candidate_id']} を conventions.md へ昇格")
-        print(f"  · {c['candidate_id']} を promoted にし、conventions.md を確定しました。")
+        print(f"  · {c['candidate_id']} を promoted にし conventions.md へ追記しました。"
+              f"文言調整は {conv.relative_to(DATA)} を直接編集してください。")
         return 0
 
     if action == "draft":
@@ -1938,10 +1891,10 @@ def main() -> int:
         return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest, repo)
     if cmd == "norms":
         return cmd_norms(sys.argv[2:])
-    table = {"reindex": cmd_reindex, "review": cmd_review, "status": cmd_status}
+    table = {"reindex": cmd_reindex, "status": cmd_status}
     if cmd in table:
         return table[cmd]()
-    print("unknown command: {}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|review|reindex|status|"
+    print("unknown command: {}\nusage: runner.py [run [task_id]|gen <prompt> [--run]|reindex|status|"
           "norms [list|promote <id>|reject <id>|draft <run_id>]]".format(cmd), file=sys.stderr)
     return 2
 

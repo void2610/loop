@@ -125,6 +125,6 @@ CI green かつ Copilot 未解決ゼロ → handoff(人間が merge)
 
 ## レビュー(種類B)
 
-run 完了後 `reviewed: false`。Web の判断フォーム(`/runs/<id>`)or `just review`(nvim 着地)で判断を書くと、
+run 完了後 `reviewed: false`。Web の判断フォーム(`/runs/<id>`)で判断を書くと、
 契約ファイル(`runs/<id>.md` の判断セクション)へ書き戻し、「自動検証に入れるべきチェック」を `review-notes.md`
 へ追記し、`reviewed: true` 化 → コミット → SQLite 再導出(すべて種類A、自動)。

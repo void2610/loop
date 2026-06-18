@@ -109,7 +109,7 @@ verifier_confidence, repo`。
 ## 環境変数 / 前提
 
 - `claude`(Claude Code CLI、headless `-p`)、`uv`(PEP 723 inline deps を自動解決)、`git`。
-- `just` は任意。`EDITOR`(既定 nvim)= `just review` の着地先。
+- `just` は任意。判断(種類B)の入力は Web の判断フォーム(`/runs/<id>`)で行う(nvim 連携は廃止)。
 - **global `~/.claude/settings.json` が `Bash(*)`/`Write`/`auto` を許可していても**、read-only 役と生成は
   `--disallowedTools` で変更系ツールを禁止して read-only を強制する。
 

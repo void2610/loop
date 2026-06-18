@@ -4,10 +4,9 @@
 # ///
 """run を triage するための読み取り専用 TUI(ビュー)。
 
-§2.5-4 / §7 を厳守: 判断・学び・review-notes は GUI で書かない。GUI は loop.db とファイルを
-読むだけで、判断対象に速く着地するためのナビゲーションに徹する。要約・採点・「推奨判断」は出さない。
-書き込みの権威は常に MD(nvim 側)。'e' で nvim に着地し、後処理(reviewed 化・コミット・upsert)は
-runner ヘルパが行う。
+判断・学び・review-notes は GUI で書かない。GUI は loop.db とファイルを読むだけで、要約・採点・
+「推奨判断」は出さない。判断の入力(種類B)は Web(`/runs/<id>` 判断フォーム)で行う。
+この TUI は閲覧専用の残置ビュー。将来 TUI から書く場合も backend API 経由にする(editor 直叩きはしない)。
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ class LoopTUI(App):
     Markdown { width: 40%; height: 1fr; border-left: solid $accent; padding: 0 1; }
     """
     BINDINGS = [
-        ("e", "edit", "判断を書く(nvim)"),
         ("u", "toggle_unreviewed", "未レビューのみ"),
         ("r", "reindex", "再インデックス"),
         ("q", "quit", "終了"),
@@ -95,26 +93,6 @@ class LoopTUI(App):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.row_key and event.row_key.value:
             self.show_detail(event.row_key.value)
-
-    def _selected_run(self) -> str | None:
-        table = self.query_one(DataTable)
-        if not self.rows:
-            return None
-        key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        return key.value if key else None
-
-    def action_edit(self) -> None:
-        run_id = self._selected_run()
-        if not run_id:
-            return
-        import os
-        md = RUNS / f"{run_id}.md"
-        editor = os.environ.get("EDITOR", "nvim")
-        with self.suspend():
-            __import__("subprocess").run([editor, f"+{runner.judgment_line(md)}", str(md)])
-        runner.mark_reviewed(run_id, runner.load_config())  # reviewed 化 + commit + upsert(種類A)
-        self._reindex()
-        self.load_rows()
 
     def action_toggle_unreviewed(self) -> None:
         self.unreviewed_only = not self.unreviewed_only

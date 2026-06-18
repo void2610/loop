@@ -64,7 +64,7 @@ verdict の妥当性・信用度・学びは人間が空欄に書く。
 フロー(種類A → 種類B → 注入):
 
 1. **起草(種類A・自動)**: **摩擦のある run**(Implementer の revise 差し戻し / Verifier の handoff / 人間レビューで verdict が覆る)でだけ、起草エージェント(read-only・構造化出力・確定権なし)が構造化サマリ+diff+差し戻し理由から規範候補を起草し、`candidates.md` へ追記する(毎 run ではない。空振りは run の `norms.json` に残す)。人間の `review-notes.md` は入力にしない(種類B 侵食を防ぐ)。
-2. **昇格(種類B・人間。絶対に自動化しない)**: `uv run runner.py norms` で pending 候補を一覧し、`promote <id>` / `reject <id>` で裁定する。promote は候補の規範文を `conventions.md` へ着地させ、**統合・上書き・文言調整・剪定は人間が** `$EDITOR` で行う(`tui.py` の nvim 着地と同型)。CLI/GUI は規範文を自動生成・要約・推奨しない。
+2. **昇格(種類B・人間。絶対に自動化しない)**: `uv run runner.py norms` で pending 候補を一覧し、`promote <id>` / `reject <id>` で裁定する。promote は候補の規範文を `conventions.md` へ追記し、**統合・上書き・文言調整・剪定は人間が `conventions.md` を直接編集して**行う(将来 Web から)。CLI/GUI は規範文を自動生成・要約・推奨しない。
 3. **注入(種類A・自動)**: 以降の run 開始時に `conventions.md`(承認済みのみ)を Author/Implementer/Verifier へ事実ブリーフとは**別セクション**で注入する。`candidates.md` は注入しない。
 
 **優先順位は `CLAUDE.md`(憲法) > `conventions.md`(承認済み規範) > 過去 run の事実ブリーフ**。注入文の冒頭に明示する。`conventions.md` が無ければ何も注入されず、摩擦が無ければ起草もされない(常時オンで分岐を増やさない)。`loop.db` の `norm_candidates` は派生インデックスで、`just reindex` が MD から完全再生成する(SQLite は authoritative にしない)。

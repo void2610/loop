@@ -1,13 +1,9 @@
 # Loop Engineering 計測配管の薄いラッパ。実体は runner.py / tui.py / stats.py。
-# 種類A(メカニクス)は全自動。種類B(判断)は just review / just tui から nvim に着地して人間が書く。
+# 種類A(メカニクス)は全自動。種類B(判断)は Web(/runs/<id> 判断フォーム)で人間が書く。
 
 # 次の todo を 1 件 headless 実行 → 検証 → コミット → MD 生成 → SQLite upsert(全自動)
 run:
     uv run runner.py run
-
-# 次の未レビュー run を nvim で開く → 保存で reviewed 化・コミット・upsert(自動)
-review:
-    uv run runner.py review
 
 # バックエンド(FastAPI: /api + SSE)のみ起動。:8765
 web:
@@ -33,7 +29,7 @@ app: web-build
     uv run webapp/main.py &
     PORT=3000 node web/.next/standalone/server.js
 
-# 読み取り専用 TUI(別ビュー / 残置)。判断は nvim 着地で書く
+# 読み取り専用 TUI(別ビュー / 残置)。判断の入力は Web で行う
 tui:
     uv run tui.py
 
