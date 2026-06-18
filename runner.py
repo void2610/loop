@@ -1589,10 +1589,18 @@ def promote_run(task: dict, run_id: str, run_dir: Path, repo: Path, wt: Path,
 
 # --- 人間介入(awaiting): 止まった run へ Web から続行指示を渡す ---
 
+STOP_SIGNAL = "__STOP__"  # await_human がこの文字列を返したら人間が UI から停止を要求
+
+
+def _stop_requested(run_dir: Path) -> bool:
+    """Web の停止ボタンが置く stop マーカーの有無。検知したら run は `stopped` で正常終了する。"""
+    return (run_dir / "stop").exists()
+
+
 def await_human(run_id: str, run_dir: Path, question: str, cfg: dict, seen: int) -> tuple[str | None, int]:
     """run を awaiting にし、人間の続行指示を inbox.jsonl から待つ(Web が POST で 1 行追記する)。
     seen = 既に消費した inbox 行数。新しい行が来たらその text を返す。
-    intervention_timeout_seconds で打ち切り → (None, seen)(呼び出し側は handoff へ倒す)。"""
+    停止要求 → (STOP_SIGNAL, seen)。intervention_timeout_seconds で打ち切り → (None, seen)(handoff へ)。"""
     timeout = int(cfg["loop"].get("intervention_timeout_seconds", 1800))
     inbox = run_dir / "inbox.jsonl"
     (run_dir / "intervention.json").write_text(
@@ -1601,6 +1609,9 @@ def await_human(run_id: str, run_dir: Path, question: str, cfg: dict, seen: int)
     print(f"  · awaiting: 人間の続行指示を待機(最大 {timeout}s)。Web の run 詳細から送信してください。")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if _stop_requested(run_dir):
+            (run_dir / "intervention.json").unlink(missing_ok=True)
+            return STOP_SIGNAL, seen
         if inbox.exists():
             rows = [l for l in inbox.read_text(encoding="utf-8").splitlines() if l.strip()]
             if len(rows) > seen:
@@ -1619,17 +1630,21 @@ def _drive_implementer(impl: "RoleSession", run_id: str, run_dir: Path, cfg: dic
                        inbox_seen: int) -> tuple[dict | None, str, int]:
     """直前に送ったメッセージに対する Implementer のターンを回す。
     **実装中**に NEEDS_HUMAN(方針疑問/権限不足)が出たら await_human で解決し同一セッションで続行。
-    通常完了したターンの (i_result, hint, inbox_seen) を返す。hint=ok/timeout/error/handoff(人間来ず)。"""
+    通常完了したターンの (i_result, hint, inbox_seen) を返す。hint=ok/timeout/error/handoff/stopped。"""
     while True:
         i_result, i_hint = impl.run_turn()
         copy_transcript(i_result, run_dir)
         if i_hint in ("timeout", "error"):
             return i_result, i_hint, inbox_seen
+        if _stop_requested(run_dir):  # ターン境界での停止検知(実行中 run の停止)
+            return i_result, "stopped", inbox_seen
         question = _needs_human(i_result)
         if not question:
             return i_result, "ok", inbox_seen  # 通常完了 → 呼び出し側でゲート + Verifier へ
         print("  · Implementer が NEEDS_HUMAN(実装中の判断/権限)→ 人間待ち")
         human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
+        if human == STOP_SIGNAL:
+            return i_result, "stopped", inbox_seen
         if human is None:
             return i_result, "handoff", inbox_seen  # 人間来ず → handoff
         print("  · 人間の回答を受領 → Implementer 続行 …")
@@ -1665,6 +1680,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
         verifier_obj = None
         retryable = False
+        stopped = False  # 人間が UI から停止を要求したか(→ verdict=stopped で正常終了)
         revise_occurred = False  # 摩擦トリガー: revise 差し戻しが起きたか(規範候補の起草条件)
         test_verdict, verifier_verdict, vcode = "none", "handoff", None
         final = "fail"
@@ -1690,6 +1706,8 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                 final, retryable = "fail", True
             elif i_hint == "handoff":  # 実装中の問いに人間が応答せず確定不能
                 final, verifier_verdict = "handoff", "handoff"
+            elif i_hint == "stopped":  # 人間が UI から停止
+                final, stopped = "stopped", True
             else:
                 # 3-5) 実装完了 → 決定論ゲート → Verifier 監査 →(欠陥なら revise を自動注入)を有界ループ。
                 revise_max = int(loop.get("implementer_revise_rounds", 2))
@@ -1721,11 +1739,17 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                         if i_hint == "handoff":
                             verifier_verdict = "handoff"
                             break
+                        if i_hint == "stopped":
+                            final, stopped = "stopped", True
+                            break
                         continue
                     # 最後の安全網: revise 上限超過 / Verifier handoff → 人間へ(主経路ではない)
                     question = ((verifier_obj or {}).get("reasons")
                                 or "自動判定では確証できません。続行指示をください。")
                     human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
+                    if human == STOP_SIGNAL:
+                        final, stopped = "stopped", True
+                        break
                     if human is None:
                         verifier_verdict = "handoff"
                         break
@@ -1739,8 +1763,11 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                     if i_hint == "handoff":
                         verifier_verdict = "handoff"
                         break
+                    if i_hint == "stopped":
+                        final, stopped = "stopped", True
+                        break
                     rounds = 0  # 人間が方向を与えた = 新フェーズ。revise カウンタをリセット
-                if not retryable:
+                if not retryable and not stopped:
                     final = combine_verdict(test_verdict, verifier_verdict)
         finally:
             impl.close()

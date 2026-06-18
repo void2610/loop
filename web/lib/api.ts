@@ -132,6 +132,10 @@ export const api = {
   sendMessage: (runId: string, text: string) =>
     request<void>("POST", `/runs/${encodeURIComponent(runId)}/message`, { body: { text } }),
 
+  // 実行中/awaiting の run を停止(stopped で正常終了)。
+  stopRun: (runId: string) =>
+    request<void>("POST", `/runs/${encodeURIComponent(runId)}/stop`),
+
   listTasks: (params?: { include_archived?: boolean }) =>
     request<TaskListResponse>("GET", "/tasks", { query: params }),
 

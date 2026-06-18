@@ -99,3 +99,15 @@ def post_message(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
     with (rd / "inbox.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
     return Response(status_code=204)
+
+
+@router.post("/runs/{run_id}/stop", status_code=204,
+             openapi_extra={"x-loop-kind": "A(中継)"})
+def stop_run(run_id: str = Depends(valid_run_id)):
+    """実行中/awaiting の run に停止マーカーを置く。runner が検知し `stopped` で正常終了
+    (ロック解放・worktree 後始末・記録を残す)。awaiting は即時、実行中はターン境界で停止。"""
+    rd = util.RUNS / run_id
+    if not rd.is_dir():
+        raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
+    (rd / "stop").write_text("", encoding="utf-8")
+    return Response(status_code=204)
