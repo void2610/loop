@@ -29,6 +29,20 @@ app: web-build
     uv run webapp/main.py &
     PORT=3000 node web/.next/standalone/server.js
 
+# Tailnet(VPN)経由でスマホ等から http://<host>.<tailnet>.ts.net:3000 でアクセスできるよう起動する。
+# frontend を Tailscale IP のみにバインド(LAN 物理 IP には出さない)、backend は 127.0.0.1 のまま=
+# RCE 露出点(dispatch/run/generate)を Tailnet 内デバイスに限定し、接続元 127.0.0.1 で auth 素通しを維持する。
+# 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる(§7 の Bearer トークンは未設定でよい)。
+app-tailnet: web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TSIP=$(tailscale ip -4 | head -1)
+    FQDN=$(tailscale status --json | python3 -c "import sys,json;print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
+    echo "起動: http://$FQDN:3000 (Tailnet 内のスマホ等から)  /  backend 127.0.0.1:8765  (Ctrl-C で停止)"
+    trap 'kill 0' EXIT INT TERM
+    uv run webapp/main.py &
+    HOSTNAME=$TSIP PORT=3000 node web/.next/standalone/server.js
+
 # 読み取り専用 TUI(別ビュー / 残置)。判断の入力は Web で行う
 tui:
     uv run tui.py

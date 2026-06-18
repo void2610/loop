@@ -88,9 +88,13 @@ data/(別 private repo / engine からは .gitignore):
 
 ```
 just app          # フロントを build → backend(:8765)+ frontend(:3000)同時起動。/api は rewrite で 8765 へ
+just app-tailnet  # スマホ等から Tailnet 経由でアクセス。frontend を Tailscale IP のみにバインド(LAN 非公開)
 just web          # backend(/api + SSE)のみ
 just web-build    # フロント本番ビルド(standalone に static 同梱)
 ```
+
+- **ネットワーク外(スマホ等)からのアクセス = Tailscale(VPN)**。`just app-tailnet` が frontend を **Tailscale IP のみ**にバインドし `http://<host>.<tailnet>.ts.net:3000` で Tailnet 内デバイスから届く(LAN 物理 IP には出さない)。**backend は 127.0.0.1 のまま** = RCE 露出点(dispatch/run/generate)を Tailnet 内に限定し、接続元 127.0.0.1 で auth 素通しを維持。JSON も SSE も同一オリジン(next rewrite / `SSE_BASE` 空)なので追加設定なしで届く。経路の暗号化・認証は Tailscale(WireGuard)に委ねる(§7 の Bearer は未設定でよい)。
+- ポートなし HTTPS(`https://<host>.ts.net`)にしたい場合は admin コンソールで **HTTPS Certificates を有効化**(`tailscale cert` がハングするのは未有効が原因)してから `tailscale serve --bg 3000`。その時 frontend は localhost バインドでよい(serve が前段プロキシ=接続元 127.0.0.1)。
 
 - **`just app` を再起動するときは先にポート解放**: `lsof -ti tcp:3000 tcp:8765 | xargs kill -9`。残った `next-server` ゾンビが :3000 を握ると `EADDRINUSE` で起動失敗する。
 - **`web/` を変えたら必ず `pnpm typecheck` と `pnpm build` を通す** → `just app` 再起動で配信に反映(standalone はメモリに旧コードを保持するので再起動必須)。
