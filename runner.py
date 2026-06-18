@@ -315,6 +315,14 @@ def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: 
 
 # --- git / リポジトリ解決 ---
 
+def _repo_entry(value) -> tuple[str, str]:
+    """[repos] の値(パス文字列 or {path, mode} テーブル)を (path, mode) に正規化する。
+    mode 既定は 'parallel'(後方互換: 文字列指定は従来どおり worktree 並列)。"""
+    if isinstance(value, dict):
+        return str(value.get("path", "") or ""), str(value.get("mode", "parallel")).strip().lower()
+    return str(value), "parallel"
+
+
 def resolve_repo(task: dict, cfg: dict) -> Path | None:
     """タスクの repo 指定を解決する。
     未指定 → [repo].path(デフォルト) / 'none' → None(no-repo) / 登録名 → [repos] のパス / それ以外 → パス。"""
@@ -326,11 +334,31 @@ def resolve_repo(task: dict, cfg: dict) -> Path | None:
         return None
     repos = cfg.get("repos", {})
     if r in repos:
-        r = repos[r]
+        r, _ = _repo_entry(repos[r])
     p = Path(r).expanduser()
     if not p.is_absolute():
         p = ROOT / p
     return p.resolve()
+
+
+def repo_mode(repo: Path | None, cfg: dict) -> str:
+    """解決済み repo パスの実行モード('serial'|'parallel')。[repos] の mode 指定から引く。
+
+    serial = worktree を作らず repo 本体で 1 本ずつ作業する(Unity 等、worktree 運用に不向きな repo 向け)。
+    runner だけがこの違いを意識する(タスク生成・記憶・契約ファイルは不変)。既定は parallel。"""
+    if repo is None:
+        return "parallel"
+    target = repo.resolve()
+    for value in (cfg.get("repos", {}) or {}).values():
+        path_str, mode = _repo_entry(value)
+        if not path_str or mode != "serial":
+            continue
+        p = Path(path_str).expanduser()
+        if not p.is_absolute():
+            p = ROOT / p
+        if p.resolve() == target:
+            return "serial"
+    return "parallel"
 
 
 def is_git_repo(path: Path) -> bool:
@@ -357,6 +385,38 @@ def add_worktree(repo: Path, run_id: str) -> tuple[Path, str]:
 def remove_worktree(repo: Path, wt: Path) -> None:
     with _wt_lock(repo):  # add と同じ repo ロックで直列化
         git(repo, "worktree", "remove", "--force", str(wt))
+
+
+# serial repo の「同時 1 本」を担保する実行ロック(run 全体を保持する。worktree 並列とは別系統)。
+_SERIAL_LOCKS: dict[str, threading.Lock] = {}
+_SERIAL_GUARD = threading.Lock()
+
+
+def _serial_lock(repo: Path) -> threading.Lock:
+    """serial repo の run を同時 1 本に直列化するロック(repo パス単位)。同一プロセス内で有効。"""
+    key = str(repo.resolve())
+    with _SERIAL_GUARD:
+        return _SERIAL_LOCKS.setdefault(key, threading.Lock())
+
+
+def enter_serial(repo: Path, run_id: str) -> tuple[Path, str, str]:
+    """serial repo: worktree を作らず repo 本体に loop/<id> ブランチを切って作業する。
+    作業ツリーは触らずブランチポインタだけ付け替える(Unity の Library 等を再 import させない)。
+    返り値 (workdir=repo, branch, orig_ref)。同時 1 本は呼び出し側の _serial_lock が担保する。"""
+    branch = f"loop/{run_id}"
+    orig_ref = git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "HEAD"
+    git(repo, "checkout", "-B", branch)
+    return repo, branch, orig_ref
+
+
+def leave_serial(repo: Path, orig_ref: str, run_id: str) -> None:
+    """serial run の後始末: 未コミット変更を loop/<id> に退避コミットしてから元ブランチへ戻す。
+    worktree の remove --force に相当する「本体を汚さない」保証。成果/中途物は loop/<id> に残る(削除しない)。"""
+    git(repo, "add", "-A")
+    if git(repo, "diff", "--cached", "--quiet").returncode != 0:
+        git(repo, "commit", "-q", "-m", f"loop run {run_id}(中断退避)")
+    if orig_ref and orig_ref != "HEAD":  # detached HEAD は元コミット sha を持たないので戻さない
+        git(repo, "checkout", orig_ref)
 
 
 def commit_worktree(wt: Path, message: str) -> bool:
@@ -1728,7 +1788,21 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         print(f"  · repo が不正: {repo} → fail")
         return "fail", False
 
-    wt, branch = add_worktree(repo, run_id)
+    # serial repo は worktree を作らず本体で 1 本ずつ作業する(Unity 等の worktree 不向き repo)。
+    # 同一 serial repo の同時実行はロックで直列化(他 repo / parallel worktree は並行のまま)。
+    serial = repo_mode(repo, cfg) == "serial"
+    lock = _serial_lock(repo) if serial else None
+    if lock:
+        lock.acquire()
+    try:
+        if serial:
+            wt, branch, orig_ref = enter_serial(repo, run_id)
+        else:
+            wt, branch, orig_ref = (*add_worktree(repo, run_id), None)
+    except BaseException:
+        if lock:
+            lock.release()
+        raise
     repo_label = str(repo)
     try:
         i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
@@ -1873,7 +1947,14 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         return final, retryable
     finally:
         clear_run_status(run_id, locals().get("final"))  # status.json を done 化(.run.lock ミラーも掃除)
-        remove_worktree(repo, wt)
+        try:
+            if serial:
+                leave_serial(repo, orig_ref, run_id)  # 退避コミット → 元ブランチへ戻す(本体を汚さない)
+            else:
+                remove_worktree(repo, wt)
+        finally:
+            if lock:
+                lock.release()
 
 
 def _run_task_to_completion(task: dict, cfg: dict) -> str:

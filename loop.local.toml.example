@@ -6,6 +6,14 @@
 [repos]
 # myproject = "/Users/me/Documents/GitHub/myproject"
 # infra     = "~/work/infra"
+#
+# 値はパス文字列(= worktree 並列。既定)か、{ path, mode } テーブルで指定する。
+# mode = "serial" にすると、その repo は worktree を作らず本体で 1 本ずつ作業する。
+# Unity など worktree にチェックアウトしても Library 等(gitignore)が無く再 import が走り、
+# 共有 .git のメタも揺れる repo 向け。runner だけがこの違いを意識する(タスク生成・記憶は不変)。
+# 成果は loop/<id> ブランチに残り、run 後は元ブランチへ戻る(本体を汚さない)。
+# 同一 serial repo の run は同時 1 本に直列化される(他 repo / 並列 repo とは並行)。
+# myunity = { path = "/Users/me/Documents/GitHub/MyUnityGame", mode = "serial" }
 
 # (任意)タスクが repo を指定しなかったときのデフォルト対象。未設定なら "."(loop 自身)。
 # [repo]

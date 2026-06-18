@@ -55,6 +55,7 @@ data/(別 private repo / engine からは .gitignore):
 > - **真の完了 = PR マージ**: `check_pr_merge`(Web `GET /api/runs/<id>/pr` / CLI `runner.py merges`)が gh で PR 状態を見て、**マージ済みなら verdict を `pass` へ昇格**。Runs 一覧は `awaiting-merge` を「PR マージ待ち」カードで強調(PR 状態 + PR リンク)。証拠は `promote.roundN.json` / `promote.json`、PR URL は run MD の `pr_url`。
 > - **Author = Explorer 統合**: 生成時に repo を read-only 調査し詳細プランを `tasks/plans/<id>.md` に出力。run 時はこのプランを Implementer に渡す(run 時 Explorer は廃止。プラン無しの手動タスクはプラン無しで Implementer 直行)。repo は常に在る前提(no-repo 分岐は撤去)。
 > - **revise ループ**: Verifier は `pass/fail/revise/handoff`。`revise` は `required_changes` を付けて Implementer に差し戻し、**同一セッションを `--resume` で継続**(前文脈保持)。回数上限 `loop.implementer_revise_rounds`(既定 2)。上限超過でも pass にせず handoff(死角を作らない)。決定論ゲートは床のまま(`test=fail → fail`、空通りテストは Verifier が revise/handoff)。
+> - **repo 単位の serial / parallel(worktree 不向き repo 向け)**: `[repos]` の値を `{ path, mode = "serial" }` にすると、その repo は **worktree を作らず repo 本体で 1 本ずつ作業**する(`runner.repo_mode` / `enter_serial` / `leave_serial`)。Unity 等、worktree にチェックアウトすると Library 等(gitignore)が無く再 import が走り共有 `.git` のメタも揺れる repo 用。**runner だけがこの違いを意識**し、タスク生成・記憶・契約ファイルは不変。成果は `loop/<id>` ブランチに残し、run 後は **元ブランチへ checkout で戻す(本体を汚さない)**。中途半端な変更も `loop/<id>` に退避コミット(削除しない)。**同一 serial repo の run は `_serial_lock` で同時 1 本に直列化**(他 repo / 並列 repo とは並行・同一プロセス内 ロック)。既定は文字列指定どおり `parallel`(worktree 並列・後方互換)。serial repo は run 開始時クリーンを想定。
 
 ---
 
