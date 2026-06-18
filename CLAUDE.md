@@ -48,7 +48,7 @@ data/(別 private repo / engine からは .gitignore):
 ```
 
 > **実行機構(現行)**: 全役は **`RoleSession`(`claude -p --input-format/--output-format stream-json` の永続双方向セッション)**で動く。one-shot(`-p <prompt>`)と `--resume` 再 spawn は撤去。追加指示(revise / 人間介入)はすべて `send()` で**同一セッションへ user メッセージ注入**に一本化。`run_role` はその単発ラッパ(Verifier 等)。
-> **人間介入(awaiting)**: handoff / revise 上限超過で run を `awaiting` にし、`runs/<id>/inbox.jsonl` の続行指示を待つ(`await_human`、`intervention_timeout_seconds`)。Web の `/runs/<id>/live` が `intervention`(詰まった理由)を出し、`POST /api/runs/<id>/message` で inbox に追記→同一セッションへ注入して続行。タイムアウトで handoff。**GUI は事実表示のみ・選択肢/判断を生成しない**。
+> **人間介入(awaiting)= 責務分離**: ①**実装中**の方針疑問/権限不足は Implementer が `NEEDS_HUMAN:` 合図でターンを区切る → `_drive_implementer` が **Verifier より前に** `await_human` で人間へ(主経路)。②**実装後**の結果/テスト欠陥は Verifier の責務で `revise` 自動修正(人間不要)。③ Verifier の handoff / revise 上限超過は**最後の安全網**としてだけ人間へ。いずれも `runs/<id>/inbox.jsonl` 待ち(`intervention_timeout_seconds`、超過で handoff)。Web の `/runs/<id>/live` が `intervention` を出し `POST /api/runs/<id>/message` で同一セッションへ注入。**GUI は事実表示のみ・選択肢/判断を生成しない**。
 > **run の役割フロー(現行)**: `Author プラン → Implementer(自己テストまで)→ 決定論ゲート → Verifier 監査 →(revise / 人間介入は同一セッションへ send)→ [promote: pass のみ]`。
 > - **promote 段(`promote_on_pass`、既定 false)**: run=pass の成果を PR 化し、**GitHub CI + Copilot レビュー**が green になるまで Implementer を `--resume` で差し戻して回す(種類A)。**merge は人間(自動 merge しない)**。上限 `promote_rounds` 超過は green にせず handoff。証拠は `promote.roundN.json` / `promote.json`、PR URL は run MD の `pr_url`。実 PR で green 収束を確認済み。
 > - **Author = Explorer 統合**: 生成時に repo を read-only 調査し詳細プランを `tasks/plans/<id>.md` に出力。run 時はこのプランを Implementer に渡す(run 時 Explorer は廃止。プラン無しの手動タスクはプラン無しで Implementer 直行)。repo は常に在る前提(no-repo 分岐は撤去)。

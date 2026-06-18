@@ -32,10 +32,15 @@ runs/<id>.md 生成 → status 更新 → SQLite upsert → data repo へ auto-c
 実行機構は全役 **`RoleSession`(`claude -p` を stream-json で双方向に開いた永続セッション)**。one-shot と
 `--resume` 再 spawn は廃止し、revise も人間介入も **同一セッションへ user メッセージを `send`** する一経路に統一。
 
-**人間介入(awaiting)**: Verifier が handoff、または revise 上限超過のとき、run を `awaiting` にして
-`runs/<id>/inbox.jsonl` の続行指示を待つ(`intervention_timeout_seconds`)。Web の `/runs/<id>/live` が
-詰まった理由(`intervention`)を表示し、`POST /api/runs/<id>/message` で指示を送ると **同一セッションへ注入して続行**
-→ 再ゲート・再監査。タイムアウトすれば handoff で確定(死角を作らない)。GUI は事実表示のみで選択肢・判断を生成しない。
+**人間介入(awaiting)= 責務分離**:
+- **実装中**の方針疑問・権限不足 → Implementer が出力冒頭に `NEEDS_HUMAN:` を付けてターンを区切る → `_drive_implementer`
+  が **Verifier より前に** awaiting にして人間の続行指示を待つ(**主経路**)。
+- **実装後**の結果/テスト欠陥 → Verifier の責務。`revise` で自動修正(人間不要)。
+- Verifier の handoff / revise 上限超過 → **最後の安全網**としてだけ人間へ。
+
+いずれも `runs/<id>/inbox.jsonl` を待つ(`intervention_timeout_seconds`、超過で handoff)。Web の `/runs/<id>/live` が
+詰まった理由(`intervention`)を表示し、`POST /api/runs/<id>/message` で指示を送ると **同一セッションへ注入して続行**。
+GUI は事実表示のみで選択肢・判断を生成しない。
 
 各役には **同一 repo の過去 run の客観的事実ブリーフ**(`build_repo_brief`、`repo_history_runs` 件)も注入する:
 過去に exit0 で通った検証コマンド / 失敗の事実 / 直近 verdict 台帳(アーカイブ run は除外)。**人間の判断は含めない**
