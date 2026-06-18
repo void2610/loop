@@ -27,10 +27,16 @@ runs/<id>.md 生成 → status 更新 → SQLite upsert → data repo へ auto-c
 各役割は `claude -p --output-format stream-json --verbose` で実行し、イベントを
 `runs/<id>/{role}.stream.jsonl` へ逐次書き出す(Web のライブ表示用)。最終 `result` イベントから
 結果(`structured_output` / `total_cost_usd` / `num_turns` / `session_id` 等)を復元する。
-差し戻し(revise)は `session_id` を `--resume` に渡し、Implementer が実装時の文脈を保持したまま再実装する。
 
 実行機構は全役 **`RoleSession`(`claude -p` を stream-json で双方向に開いた永続セッション)**。one-shot と
-`--resume` 再 spawn は廃止し、revise も人間介入も **同一セッションへ user メッセージを `send`** する一経路に統一。
+`--resume` 再 spawn は廃止し、revise も人間介入も **同一セッションへ user メッセージを `send`** する一経路に統一
+(Implementer は実装文脈を保持したまま追加指示を受けて続行する)。
+
+**verdict 一覧**: `pass`(promote 時はマージ済み)/ `fail` / `handoff`(人間判断が要る)/ `timeout` /
+`stopped`(人間が UI から停止)/ `awaiting-merge`(promote 後・PR マージ待ち)。
+
+**停止(UI)**: `POST /api/runs/<id>/stop` が `runs/<id>/stop` マーカーを置く。runner が await_human のポーリングと
+実装ターン境界で検知し **`stopped` で正常終了**(awaiting は即時、実行中はターン境界。ロック解放・worktree 後始末・記録を残す)。
 
 **人間介入(awaiting)= 責務分離**:
 - **実装中**の方針疑問・権限不足 → Implementer が出力冒頭に `NEEDS_HUMAN:` を付けてターンを区切る → `_drive_implementer`

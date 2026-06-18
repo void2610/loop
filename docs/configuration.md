@@ -67,7 +67,7 @@ constraints:             # 禁止領域・制約(任意)
   - ...
 allowed_tools: Read,Edit,Write,Bash   # headless に事前認可(カンマ区切り or リスト)
 max_attempts: 1          # (任意) run 全体の再試行上限。非冪等タスク(外部FS書き換え等)は 1
-status: todo             # todo | pass | fail | timeout | handoff(runner が更新)
+status: todo             # todo | pass | fail | handoff | timeout | stopped | awaiting-merge(runner が更新)
 ---
 
 (自由メモ)

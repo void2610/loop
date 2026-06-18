@@ -48,18 +48,23 @@ Web UI で「Tasks → ＋新規」からやりたいことを日本語で書く
 ## 1 run の流れ(種類A / runner.py)
 
 `data/tasks/*.md` から次の `todo` を選択 → **対象 repo 解決** → `git worktree` 隔離 →
-**Author プラン → Implementer → 決定論ゲート → Verifier 監査 →(revise 差し戻し)** → verdict 合成 →
-自動チェックポイントコミット →(pass かつ promote 有効なら **PR 提出→CI/Copilot green まで自動修正**)→
+**Author プラン → Implementer → 決定論ゲート → Verifier 監査 →(revise / 人間介入)** → verdict 合成 →
+自動チェックポイントコミット →(pass かつ promote 有効なら **PR 提出→CI/Copilot green まで自動修正→マージ待ち**)→
 `runs/<id>.md` 生成(判断は空 / `reviewed:false`)→ SQLite upsert → 後始末。
 
+- **実行機構**: 各役は **`claude -p` を stream-json で双方向に開いた永続セッション(`RoleSession`)**。one-shot と
+  `--resume` 再 spawn は廃止し、revise も人間介入も **同一セッションへ user メッセージを送る**一経路に統一。
 - **役割**: Author(生成時に repo を read-only 調査し実装プランを書く=旧 Explorer 統合)→ Implementer
   (主力/read-write/自己テストまで)→ 決定論ゲート(`verify`)→ Verifier(**別モデル必須**/read-only/構造化出力で
-  独立監査。test gaming を疑う)。
-- **revise**: Verifier が `revise` を返すと `required_changes` を付けて Implementer を **`--resume`(文脈保持)**で
-  差し戻し→再ゲート→再監査(上限 `implementer_revise_rounds`、超過は handoff)。
-- **verdict 合成**: test=fail→fail / verifier=fail→fail(テスト緑でも gaming 捕捉)/ verifier=handoff→handoff / 他→pass。
-- **promote(任意 `promote_on_pass`)**: pass の成果を PR 化し、**GitHub CI + Copilot レビュー**が green になるまで
-  Implementer を差し戻して回す。**merge は人間**(自動 merge しない)。
+  独立監査。test gaming を疑う。人間の介入回答も入力に取る)。
+- **revise(実装後の欠陥)**: Verifier が `revise` を返すと `required_changes` を付けて同一セッションへ差し戻し
+  →再ゲート→再監査(上限 `implementer_revise_rounds`)。**自動・人間不要**。
+- **人間介入(実装中の判断/権限)**: Implementer が詰まると `NEEDS_HUMAN:` で止まる → `awaiting`。Web の Runs 一覧/
+  ライブから続行指示を送ると同一セッションへ注入して続行。UI から **run の停止**も可能(→ `stopped`)。
+- **verdict**: `pass`(promote 時はマージ済み)/ `fail` / `handoff`(人間判断要)/ `timeout` / `stopped`(人間が停止)/
+  `awaiting-merge`(promote 後・PR マージ待ち)。合成: test=fail→fail / verifier=fail→fail / verifier=handoff→handoff / 他→pass。
+- **promote(任意 `promote_on_pass`)**: pass の成果を PR 化し **GitHub CI + Copilot** が green まで自動修正 → **`awaiting-merge`**。
+  **人間が PR をマージして初めて `pass`(真の完了)**。自動 merge はしない。
 - **停止条件3段**: `--max-turns` / `--max-budget-usd` / wall-clock タイムアウト。
 - **read-only 強制**: Verifier/生成は `--disallowedTools` で変更系ツールを禁止(global settings を上書き)。
 
@@ -74,9 +79,9 @@ Web UI で「Tasks → ＋新規」からやりたいことを日本語で書く
 
 | ページ | 内容 |
 |---|---|
-| `/runs` | run 一覧(repo バッジ / verdict / フィルタ / dispatch)。**実行中 run も行表示**(クリックでライブ) |
+| `/runs` | run 一覧。**人間の介入待ち(awaiting)**=オレンジ枠 /**PR マージ待ち(awaiting-merge)**=緑枠(PR 状態+PR リンク)/ 実行中 を上部に強調。verdict/フィルタ/dispatch |
 | `/runs/<id>` | run detail(front-matter・事実要約・diff・証拠・**判断フォーム**・PR リンク) |
-| `/runs/<id>/live` | **実行中のライブ transcript**(役割ごと、near-real-time) |
+| `/runs/<id>/live` | ライブ transcript +**続行指示パネル(awaiting 時)**+**「この run を停止」** |
 | `/runs/<id>/transcript` | transcript を会話ビューで表示 |
 | `/tasks` | タスク一覧(repo バッジ / status / 最新 run / 実行・アーカイブ) |
 | `/tasks/new` | **プロンプトからタスク生成**(repo 選択必須 + 自動実行トグル) |
@@ -90,7 +95,7 @@ Web UI で「Tasks → ＋新規」からやりたいことを日本語で書く
 ```
 engine(公開 repo):
   loop.toml           設定([loop]/[agents]/[data]。repo 構成は loop.local.toml)
-  runner.py           一本道ランナー: Author/Implementer/Verifier / revise / promote / 生成 / status(種類A)
+  runner.py           一本道ランナー: Author/Implementer/Verifier / revise / 人間介入 / promote / merges / 生成(種類A)
   loopdb.py           SQLite インデックス層(MD 派生・再生成可能)
   webapp/             FastAPI(/api JSON + SSE。UI 供給は Next)
   web/                Next.js(App Router)+ TS + Tailwind + shadcn/ui = 唯一の UI
@@ -116,6 +121,7 @@ data/(別の private git repo / engine からは .gitignore):
 | 次の todo を実行 | `just run` / `uv run runner.py run [task_id]` |
 | プロンプト生成 | `uv run runner.py gen "<依頼>" [--repo <r>] [--run]` |
 | 規範候補の昇格/却下(種類B) | `uv run runner.py norms [list\|promote <id>\|reject <id>]` |
+| PR マージ待ち run の確認(マージ済み→pass 昇格) | `uv run runner.py merges` |
 | Web(フロント+バック) | `just app`(UI: http://localhost:3000、判断・レビューはここ) |
 | backend のみ | `just web` |
 | TUI | `just tui` |
