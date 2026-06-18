@@ -105,7 +105,10 @@ def post_message(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
 def run_pr(run_id: str = Depends(valid_run_id)):
     """awaiting-merge の run の PR 状態を gh で確認。マージ済みなら verdict を pass へ昇格(真の完了)。"""
     st = runner.check_pr_merge(run_id, runner.load_config())
-    return schemas.PrStatus(**{k: st.get(k) for k in ("number", "url", "state", "merged", "ci")})
+    # PR 未作成(pr_url 無し)では check_pr_merge が {} を返す。None を渡すと merged:bool 検証に
+    # 落ちるため、存在するキーだけ渡してモデル既定(merged=False 等)を効かせる。
+    keys = ("number", "url", "state", "merged", "ci")
+    return schemas.PrStatus(**{k: st[k] for k in keys if st.get(k) is not None})
 
 
 @router.post("/runs/{run_id}/stop", status_code=204,
