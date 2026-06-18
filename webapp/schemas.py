@@ -171,7 +171,7 @@ class TaskInput(BaseModel):
 
 
 class JudgmentInput(BaseModel):
-    """判断は trust/risk/checks/learning の散文 4 キー + 任意の human_verdict。全デフォルト空文字。
+    """判断は単一の自由記述 notes + 任意の human_verdict。全デフォルト空文字。
 
     サーバはどのフィールドにも値を合成しない。model_dump() を無変換で write_judgment へ。
     human_verdict は人間が verdict を覆すときだけ選ぶ構造化シグナル(空=覆さない)。
@@ -179,10 +179,7 @@ class JudgmentInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    trust: str = ""
-    risk: str = ""
-    checks: str = ""
-    learning: str = ""
+    notes: str = ""
     human_verdict: str = ""
 
 

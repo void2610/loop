@@ -58,10 +58,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
     try {
       // JudgmentInput の 4 キーのみを無加工で送る。改行は透過し strip は runner に委ねる(§6.6)。
       const body: JudgmentInput = {
-        trust: state.trust ?? "",
-        risk: state.risk ?? "",
-        checks: state.checks ?? "",
-        learning: state.learning ?? "",
+        notes: state.notes ?? "",
         human_verdict: human,
       };
       await api.putJudgment(runId, body);
@@ -139,10 +136,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
 
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         {fields.map(([key, label]) => (
-          <div
-            key={key}
-            className={`flex min-h-0 flex-col gap-1 ${key === "learning" ? "flex-[2.2]" : "flex-1"}`}
-          >
+          <div key={key} className="flex min-h-0 flex-1 flex-col gap-1">
             <Label htmlFor={`judgment-${key}`} className="th-label">{label}</Label>
             <Textarea
               id={`judgment-${key}`}
@@ -163,7 +157,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
       <div className="space-y-2">
         {error ? <p className="text-sm text-verdict-fail">{error}</p> : null}
         <p className="text-xs text-muted-foreground">
-          保存すると runs/{runId}.md へ書き戻し、checks は review-notes.md に追記、reviewed
+          保存すると runs/{runId}.md へ書き戻し、判断は review-notes.md に追記、reviewed
           化・コミット・再インデックスを runner が自動実行します。⌘↵ で保存。
         </p>
         <Button type="submit" disabled={saving} className="w-full">

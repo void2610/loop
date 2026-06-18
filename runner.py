@@ -1294,15 +1294,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
 ## 証拠
 {chr(10).join(evidence)}
 
-{JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない）
-
-### 信用できるか
-
-### 失敗/リスク
-
-### 自動検証に入れるべきチェック
-
-### 学び
+{JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない・自由記述）
 """
     out = RUNS / f"{run_id}.md"
     out.write_text(body, encoding="utf-8")
@@ -1400,53 +1392,35 @@ def maybe_draft_on_review(run_id: str, cfg: dict) -> None:
 
 # --- 判断の読み書き(GUI フォーム ↔ 契約ファイル。中身は人間が書く) ---
 
-# (フォーム field, MD 箇条書きラベル) の対応。順序は MD の表示順。
-JUDGMENT_FIELDS = [
-    ("trust", "信用できるか"),
-    ("risk", "失敗/リスク"),
-    ("checks", "自動検証に入れるべきチェック"),
-    ("learning", "学び"),
-]
+# 判断は単一の自由記述欄(notes)。GUI は判断を生成しないので、入力面は最小限の1欄に保つ。
+JUDGMENT_FIELDS = [("notes", "判断(自由記述)")]
 
 
 def parse_judgment(md: Path) -> dict:
-    """MD の判断セクション(### サブ見出し)から各フィールドの現在値を読む(prefill 用)。
+    """MD の判断セクション(## 判断 以降の自由記述)を notes として読む(prefill 用)。
     複数行・複数段落をそのまま保持する。"""
-    label_to_key = {label: key for key, label in JUDGMENT_FIELDS}
-    values = {key: "" for key, _ in JUDGMENT_FIELDS}
+    values = {"notes": ""}
     text = md.read_text(encoding="utf-8")
     if JUDGMENT_HEADING not in text:
         return values
     section = text.split(JUDGMENT_HEADING, 1)[1]
-    cur, buf = None, []
-    for line in section.splitlines():
-        if line.startswith("### "):
-            if cur is not None:
-                values[cur] = "\n".join(buf).strip()
-            cur, buf = label_to_key.get(line[4:].strip()), []
-        elif cur is not None:
-            buf.append(line)
-    if cur is not None:
-        values[cur] = "\n".join(buf).strip()
+    # 1 行目は見出しの残り(「← 人間が…」)なので落とし、以降を自由記述本文とする。
+    values["notes"] = "\n".join(section.splitlines()[1:]).strip()
     return values
 
 
 def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
-    """種類A: GUI から来た判断を契約ファイルへ書き戻す。中身(fields)は人間が書いたもの。
+    """種類A: GUI から来た判断を契約ファイルへ書き戻す。中身(notes)は人間が書いた自由記述。
     判断セクション置換 → review-notes.md 追記 → reviewed 化 → SQLite 再導出 → コミット。
-    複数行の散文(学び・判断)を圧縮せずそのまま保持する。"""
+    複数行の散文を圧縮せずそのまま保持する。"""
     md = RUNS / f"{run_id}.md"
     lines = md.read_text(encoding="utf-8").splitlines()
     head = next((i for i, l in enumerate(lines) if l.startswith(JUDGMENT_HEADING)), len(lines))
 
-    section = [f"{JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない）", ""]
-    for key, label in JUDGMENT_FIELDS:
-        section.append(f"### {label}")
-        section.append("")
-        val = (fields.get(key) or "").strip()
-        if val:
-            section.append(val)
-            section.append("")
+    notes = (fields.get("notes") or "").strip()
+    section = [f"{JUDGMENT_HEADING} ← 人間がここだけ書く（種類B / 自動化しない・自由記述）", ""]
+    if notes:
+        section += [notes, ""]
     md.write_text("\n".join(lines[:head] + section).rstrip() + "\n", encoding="utf-8")
 
     # human_verdict: 人間が verdict を覆すときだけ front-matter に刻む構造化シグナル(空=覆さない)。
@@ -1457,11 +1431,10 @@ def write_judgment(run_id: str, fields: dict, cfg: dict) -> None:
     else:
         _clear_fm_key(md, "human_verdict")
 
-    checks = (fields.get("checks") or "").strip()
-    if checks:
+    if notes:  # 種類B の R&D ログとして review-notes.md に全文を蓄積する。
         day = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
-        cl = checks.splitlines()
-        entry = f"- {day} {run_id}: {cl[0]}\n" + "".join(f"  {x}\n" for x in cl[1:])
+        nl = notes.splitlines()
+        entry = f"- {day} {run_id}: {nl[0]}\n" + "".join(f"  {x}\n" for x in nl[1:])
         with REVIEW_NOTES.open("a", encoding="utf-8") as f:
             f.write(entry)
 
