@@ -418,74 +418,118 @@ def auto_commit(repo: Path, paths: list[Path], message: str) -> None:
 WRITE_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"]
 
 
+def _user_msg(text: str) -> str:
+    """stream-json 入力の user メッセージ 1 行。これを stdin に流して 1 ターンを駆動する。"""
+    return json.dumps({"type": "user", "message": {"role": "user",
+                       "content": [{"type": "text", "text": text}]}}, ensure_ascii=False)
+
+
+class RoleSession:
+    """役割の **永続セッション**(`claude -p --input-format/--output-format stream-json`)。
+    唯一の実行機構: one-shot も --resume 再 spawn も廃し、追加指示(revise / 人間介入)は
+    すべて send() で同一セッションへ user メッセージとして注入する。
+    run_turn() は次の result イベントまで読み、セッションは開いたまま(次の send を待てる)。"""
+
+    def __init__(self, role: str, wt: Path, cfg: dict, run_dir: Path, model: str, tools: list[str],
+                 read_only: bool = False, extra_args: list[str] | None = None,
+                 resume_session: str | None = None):
+        loop = cfg["loop"]
+        cmd = [
+            "claude", "-p",
+            "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+            "--model", model,
+            "--max-turns", str(loop.get("max_turns", 40)),
+            "--max-budget-usd", str(loop["max_budget_usd"]),
+            "--permission-mode", loop.get("permission_mode", "default"),
+            "--allowedTools", *tools,
+        ]
+        if resume_session:
+            cmd += ["--resume", resume_session]
+        if read_only:
+            cmd += ["--disallowedTools", *WRITE_TOOLS]
+        if extra_args:
+            cmd += extra_args
+        self.role, self.run_dir, self.timeout = role, run_dir, loop["timeout_seconds"]
+        self._lines: list[str] = []
+        self._sf = (run_dir / f"{role}.stream.jsonl").open("w", encoding="utf-8")
+        self.proc = subprocess.Popen(cmd, cwd=str(wt), stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        self._closed = False
+
+    def send(self, text: str) -> None:
+        """user メッセージを 1 件注入(初回プロンプト・revise 指摘・人間の続行指示すべて共通)。"""
+        if self.proc.stdin and not self.proc.stdin.closed:
+            self.proc.stdin.write(_user_msg(text) + "\n")
+            self.proc.stdin.flush()
+
+    def run_turn(self) -> tuple[dict | None, str]:
+        """次の result イベントまで stdout を読む(セッションは開いたまま)。(result, hint) を返す。"""
+        killed = {"v": False}
+
+        def _kill():
+            killed["v"] = True
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+
+        timer = threading.Timer(self.timeout, _kill)
+        timer.start()
+        result = None
+        try:
+            for line in self.proc.stdout:  # イベントが来るたび即ファイルへ(Web がライブ tail)
+                self._sf.write(line)
+                self._sf.flush()
+                self._lines.append(line)
+                try:
+                    o = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(o, dict) and o.get("type") == "result":
+                    result = o
+                    break  # 1 ターン完了。stdin は開いたまま次の send を待てる
+        finally:
+            timer.cancel()
+        if killed["v"]:
+            return None, "timeout"
+        if result is None:  # stdout が result 無しで尽きた(EOF/クラッシュ)
+            (self.run_dir / f"{self.role}.result.raw.txt").write_text("".join(self._lines), encoding="utf-8")
+            return None, "error"
+        (self.run_dir / f"{self.role}.result.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result, ("error" if result.get("is_error") else "ok")
+
+    def close(self) -> None:
+        """stdin を閉じてセッション終了(EOF)。stderr を保存。"""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self.proc.stdin and not self.proc.stdin.closed:
+                self.proc.stdin.close()
+            self.proc.wait(timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            self.proc.kill()
+        try:
+            (self.run_dir / f"{self.role}.stderr.log").write_text(self.proc.stderr.read() or "", encoding="utf-8")
+        except (OSError, ValueError):
+            pass
+        self._sf.close()
+
+
 def run_role(role: str, prompt: str, wt: Path, cfg: dict, model: str,
              tools: list[str], run_dir: Path,
              extra_args: list[str] | None = None, read_only: bool = False,
              resume_session: str | None = None) -> tuple[dict | None, str]:
-    """役割を1つ headless 実行し {role}.result.json / {role}.stderr.log を保存する。
-    read_only=True は変更系ツールを --disallowedTools で禁止(global settings を上書き)。
-    resume_session 指定時は --resume で同一セッションを継続し前文脈を保持する(差し戻し再実装)。"""
-    loop = cfg["loop"]
-    cmd = [
-        "claude", "-p", prompt,
-        "--output-format", "stream-json", "--verbose",  # 逐次イベントを得てライブ表示する
-        "--model", model,
-        "--max-turns", str(loop.get("max_turns", 40)),
-        "--max-budget-usd", str(loop["max_budget_usd"]),
-        "--permission-mode", loop.get("permission_mode", "default"),
-        "--allowedTools", *tools,
-    ]
-    if resume_session:
-        cmd += ["--resume", resume_session]
-    if read_only:
-        cmd += ["--disallowedTools", *WRITE_TOOLS]
-    if extra_args:
-        cmd += extra_args
-
-    stream_path = run_dir / f"{role}.stream.jsonl"
-    err = run_dir / f"{role}.stderr.log"
-    proc = subprocess.Popen(cmd, cwd=str(wt), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, bufsize=1)
-    killed = {"v": False}
-
-    def _kill():
-        killed["v"] = True
-        try:
-            proc.kill()
-        except OSError:
-            pass
-
-    timer = threading.Timer(loop["timeout_seconds"], _kill)
-    timer.start()
-    lines: list[str] = []
+    """単発役(1 ターンで完結。Verifier / 単発用)の薄いラッパ。実体は RoleSession。
+    1 メッセージ送って 1 ターン読み、stdin を閉じて終了する(= 旧 one-shot と同形だが stream-json IO)。"""
+    sess = RoleSession(role, wt, cfg, run_dir, model, tools,
+                       read_only=read_only, extra_args=extra_args, resume_session=resume_session)
     try:
-        with stream_path.open("w", encoding="utf-8") as sf:
-            for line in proc.stdout:  # イベントが来るたび即ファイルへ(Web がライブ tail する)
-                sf.write(line)
-                sf.flush()
-                lines.append(line)
+        sess.send(prompt)
+        return sess.run_turn()
     finally:
-        timer.cancel()
-        proc.wait()
-    err.write_text(proc.stderr.read() or "", encoding="utf-8")
-    if killed["v"]:
-        return None, "timeout"
-
-    result = None
-    for line in reversed(lines):  # 末尾の result イベント(= 従来の json 出力と同形)を拾う
-        try:
-            o = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(o, dict) and o.get("type") == "result":
-            result = o
-            break
-    if result is None:
-        (run_dir / f"{role}.result.raw.txt").write_text("".join(lines), encoding="utf-8")
-        return None, "error"
-    (run_dir / f"{role}.result.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    return result, ("error" if result.get("is_error") else "ok")
+        sess.close()
 
 
 def resolve_tools(value, fallback: list[str]) -> list[str]:
@@ -1499,6 +1543,34 @@ def promote_run(task: dict, run_id: str, run_dir: Path, repo: Path, wt: Path,
             "ci_fail": [f["name"] for f in ci_fails], "copilot_unresolved": len(threads)}
 
 
+# --- 人間介入(awaiting): 止まった run へ Web から続行指示を渡す ---
+
+def await_human(run_id: str, run_dir: Path, question: str, cfg: dict, seen: int) -> tuple[str | None, int]:
+    """run を awaiting にし、人間の続行指示を inbox.jsonl から待つ(Web が POST で 1 行追記する)。
+    seen = 既に消費した inbox 行数。新しい行が来たらその text を返す。
+    intervention_timeout_seconds で打ち切り → (None, seen)(呼び出し側は handoff へ倒す)。"""
+    timeout = int(cfg["loop"].get("intervention_timeout_seconds", 1800))
+    inbox = run_dir / "inbox.jsonl"
+    (run_dir / "intervention.json").write_text(
+        json.dumps({"question": question}, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_run_status(run_id=run_id, phase="awaiting")
+    print(f"  · awaiting: 人間の続行指示を待機(最大 {timeout}s)。Web の run 詳細から送信してください。")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if inbox.exists():
+            rows = [l for l in inbox.read_text(encoding="utf-8").splitlines() if l.strip()]
+            if len(rows) > seen:
+                try:
+                    text = (json.loads(rows[seen]).get("text") or "").strip()
+                except json.JSONDecodeError:
+                    text = ""
+                (run_dir / "intervention.json").unlink(missing_ok=True)
+                return (text or None), seen + 1
+        time.sleep(2)
+    (run_dir / "intervention.json").unlink(missing_ok=True)
+    return None, seen
+
+
 # --- コマンド ---
 
 def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[str, bool]:
@@ -1536,54 +1608,72 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         # 注入順 = 優先順位: 承認済み規範(手続き的記憶)→ 過去 run の事実(両方とも CLAUDE.md/憲法 には劣後)。
         brief = build_norms_brief(repo, cfg) + build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))
 
-        # 2) Implementer(read-write、自己テストまで)。差し戻し時は同一セッションを --resume で継続。
+        # 2) Implementer = 永続セッション。revise も人間介入も同一セッションへ send で注入(--resume 再 spawn は廃止)。
         write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
                          started_at=started_at, phase="implementer")
         print("  · Implementer 実装中 …")
-        i_result, i_hint = run_role(
-            "implementer", render_implementer_prompt(task, impl_context, "Author の実装プラン(repo 調査済み)", brief),
-            wt, cfg, agents["implementer_model"], i_tools, run_dir)
+        impl = RoleSession("implementer", wt, cfg, run_dir, agents["implementer_model"], i_tools)
+        i_result, inbox_seen = None, 0
+        try:
+            impl.send(render_implementer_prompt(task, impl_context, "Author の実装プラン(repo 調査済み)", brief))
+            i_result, i_hint = impl.run_turn()
+            copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
+            if i_hint == "timeout":
+                final, retryable = "timeout", True
+            elif i_hint == "error":
+                final, retryable = "fail", True
+            else:
+                # 3-5) 決定論ゲート → Verifier 監査 →(revise / 人間介入は send で同一セッションへ)を有界ループ。
+                revise_max = int(loop.get("implementer_revise_rounds", 2))
+                rounds = 0
+                while True:
+                    capture_diff(wt, run_dir)
+                    write_run_status(run_id=run_id, phase="verifier")
+                    test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"(床)
+                    diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
+                    tp = run_dir / "test-output.txt"
+                    test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+                    verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
+                    if verifier_obj is not None:  # 各ラウンドの判断を証拠として残す(最終 verifier.json とは別)
+                        (run_dir / f"verifier.round{rounds + 1}.json").write_text(
+                            json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                    if verifier_verdict in ("pass", "fail"):
+                        break
+                    # revise(回数内): 同一セッションへ差し戻し指示を注入
+                    if verifier_verdict == "revise" and rounds < revise_max:
+                        rounds += 1
+                        revise_occurred = True
+                        print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})→ Implementer 再実装 …")
+                        write_run_status(run_id=run_id, phase="implementer")
+                        impl.send(render_revise_prompt(task, verifier_obj))
+                        i_result, i_hint = impl.run_turn()
+                        copy_transcript(i_result, run_dir)
+                        if i_hint in ("timeout", "error"):
+                            final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+                            break
+                        continue
+                    # handoff / revise 上限超過 → 人間介入(awaiting)。Web から続行指示が来れば同一セッションへ注入。
+                    question = ((verifier_obj or {}).get("reasons")
+                                or (i_result or {}).get("result")
+                                or "自動判定では確証できません。続行指示をください。")
+                    human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
+                    if human is None:  # 介入なし/タイムアウト → handoff 確定(死角を作らない)
+                        verifier_verdict = "handoff"
+                        break
+                    print("  · 人間の続行指示を受領 → Implementer 続行 …")
+                    write_run_status(run_id=run_id, phase="implementer")
+                    impl.send(human)
+                    i_result, i_hint = impl.run_turn()
+                    copy_transcript(i_result, run_dir)
+                    if i_hint in ("timeout", "error"):
+                        final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+                        break
+                    rounds = 0  # 人間が方向を与えた = 新フェーズ。revise カウンタをリセット
+                if not retryable:
+                    final = combine_verdict(test_verdict, verifier_verdict)
+        finally:
+            impl.close()
         session_id = (i_result or {}).get("session_id")
-        copy_transcript(i_result, run_dir)   # 主トランスクリプトは Implementer セッション
-
-        if i_hint == "timeout":
-            final, retryable = "timeout", True
-        elif i_hint == "error":
-            final, retryable = "fail", True
-        else:
-            # 3-5) 決定論ゲート → Verifier 監査 →(revise なら Implementer を --resume で差し戻し)を有界ループ。
-            revise_max = int(loop.get("implementer_revise_rounds", 2))
-            rounds = 0
-            while True:
-                capture_diff(wt, run_dir)
-                write_run_status(run_id=run_id, phase="verifier")
-                test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"(床)
-                diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
-                tp = run_dir / "test-output.txt"
-                test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
-                verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
-                if verifier_obj is not None:  # 各ラウンドの判断を証拠として残す(最終 verifier.json とは別)
-                    (run_dir / f"verifier.round{rounds + 1}.json").write_text(
-                        json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-                if verifier_verdict != "revise":
-                    break
-                if rounds >= revise_max:
-                    print(f"  · 差し戻し上限({revise_max})到達 → handoff(確証できないため人間へ)")
-                    verifier_verdict = "handoff"  # 死角を作らない: 未確証は pass にせず人間へ
-                    break
-                rounds += 1
-                revise_occurred = True
-                print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})→ Implementer 再実装 …")
-                write_run_status(run_id=run_id, phase="implementer")
-                i_result, i_hint = run_role(
-                    "implementer", render_revise_prompt(task, verifier_obj), wt, cfg,
-                    agents["implementer_model"], i_tools, run_dir, resume_session=session_id)
-                copy_transcript(i_result, run_dir)
-                if i_hint in ("timeout", "error"):
-                    final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
-                    break
-            if not retryable:
-                final = combine_verdict(test_verdict, verifier_verdict)
 
         # remove --force の前にコミットして成果を loop/<id> ブランチに残す。
         committed = commit_worktree(wt, f"loop run {run_id} → {final}")

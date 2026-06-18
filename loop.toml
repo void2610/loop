@@ -23,6 +23,10 @@ max_attempts = 2
 # 0 で差し戻し無効(従来挙動)。上限超過でも pass にせず handoff(検証の死角を作らない)。
 implementer_revise_rounds = 2
 
+# 人間介入: handoff / revise 上限超過で run を awaiting にし、Web からの続行指示を待つ秒数。
+# 同一 stream-json セッションへ指示を注入して続行する。タイムアウトで handoff 確定(死角を作らない)。
+intervention_timeout_seconds = 1800
+
 # promote: run=pass の成果を PR 化し、GitHub CI + Copilot レビューが green になるまで
 # Implementer を --resume で差し戻して回す(種類A)。merge は人間(自動 merge しない)。
 # 既定 false(安全)。有効化すると pass のたびに実 PR を作る外向き動作になる。
