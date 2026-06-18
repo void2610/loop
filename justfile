@@ -1,4 +1,4 @@
-# Loop Engineering 計測配管の薄いラッパ。実体は runner.py / tui.py / stats.py。
+# Loop Engineering 計測配管の薄いラッパ。実体は runner.py / stats.py。
 # 種類A(メカニクス)は全自動。種類B(判断)は Web(/runs/<id> 判断フォーム)で人間が書く。
 
 # 次の todo を 1 件 headless 実行 → 検証 → コミット → MD 生成 → SQLite upsert(全自動)
@@ -21,40 +21,35 @@ web-build:
     [ -d public ] && cp -r public .next/standalone/public || true
     echo "frontend build 完了(.next/standalone)"
 
-# フロントをビルドし、backend(:8765)と frontend(:3000)を同時起動。Ctrl-C で両方停止
-app: web-build
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "起動: backend http://127.0.0.1:8765  /  frontend http://127.0.0.1:3000  (Ctrl-C で停止)"
-    trap 'kill 0' EXIT INT TERM
-    uv run webapp/main.py &
-    PORT=3000 node web/.next/standalone/server.js
-
 # Tailnet(VPN)経由でスマホ等から http://<host>.<tailnet>.ts.net:3000 でアクセスできるよう起動する。
+# このリポジトリの**唯一の公式起動口**。手元 / 他デバイスのどちらからでも同じ手順で使える。
 # 方式: frontend / backend とも 127.0.0.1 のまま、tailscaled を前段プロキシにする(`tailscale serve --http`)。
 #   - macOS の Application Firewall は未署名の node への外部着信を block するが、着信を受けるのは
 #     署名済み・許可済みの tailscaled なので回避できる(node 直バインドだと iPhone から届かない)。
 #   - tailscaled→localhost→backend で接続元は常に 127.0.0.1。webapp は proxy_headers=False なので
 #     X-Forwarded で汚染されず auth は loopback 素通し(§7 の Bearer は未設定でよい)。
-#   - 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる。停止後の serve 解除は `just serve-off`。
+#   - 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる。
+# 安定性: ① 残存ポートを事前掃除 ② tailscale serve は `--bg` で無音失敗しうるので **status で検証** ③ 終了
+#   時に serve を自動 off にし、設定漏れの中途半端な状態を残さない。
 app-tailnet: web-build
     #!/usr/bin/env bash
     set -euo pipefail
+    # 残存 next-server / uvicorn が :3000/:8765 を握ると EADDRINUSE で起動失敗する。先に掃除する
+    lsof -ti tcp:3000 tcp:8765 2>/dev/null | xargs kill -9 2>/dev/null || true
+    # tailscaled を前段に(ALF 回避)。--bg は非同期 + 冪等で、失敗しても script は止まらないため
+    # 直後に `tailscale serve status` で設定反映を検証する(これが無いと「画面は出るが API が 403」になる)
+    tailscale serve --bg --http=3000 3000
+    if ! tailscale serve status 2>/dev/null | grep -q "proxy http://127.0.0.1:3000"; then
+        echo "✗ tailscale serve の設定が反映されていません。`tailscale serve status` を確認してください" >&2
+        exit 1
+    fi
     FQDN=$(tailscale status --json | python3 -c "import sys,json;print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
-    tailscale serve --bg --http=3000 3000   # tailscaled を前段に(ALF 回避)。--bg は冪等・永続
-    echo "起動: http://$FQDN:3000 (Tailnet 内のスマホ等から)  /  backend 127.0.0.1:8765  (Ctrl-C で停止)"
-    trap 'kill 0' EXIT INT TERM
+    echo "起動: http://$FQDN:3000 (Tailnet 内のデバイスから)  /  backend 127.0.0.1:8765  (Ctrl-C で停止)"
+    # Ctrl-C / 異常終了で serve も off にする(永続設定の中途半端を残さない)。kill 0 は同一プロセスグループ
+    cleanup() { tailscale serve --http=3000 off >/dev/null 2>&1 || true; kill 0 2>/dev/null || true; }
+    trap cleanup EXIT INT TERM
     uv run webapp/main.py &
     HOSTNAME=127.0.0.1 PORT=3000 node web/.next/standalone/server.js
-
-# app-tailnet の Tailnet 公開(serve)を解除する。frontend/backend の停止は Ctrl-C で別途。
-serve-off:
-    tailscale serve --http=3000 off
-    @echo "Tailnet 公開(http://<host>:3000)を解除しました。"
-
-# 読み取り専用 TUI(別ビュー / 残置)。判断の入力は Web で行う
-tui:
-    uv run tui.py
 
 # loop.db を破棄し runs/*.md から完全再生成(ビューは捨ててよい)
 reindex:
