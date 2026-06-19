@@ -791,10 +791,11 @@ def _safe_task_id(raw: str) -> str:
 
 
 def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
-           base_branch: str | None = None) -> int:
+           base_branch: str | None = None, no_pr: bool = False) -> int:
     """自然言語の依頼からタスクを生成して data/tasks/ に書き、必要なら実行(background 想定)。
     repo を明示指定したら(空/None 以外)モデル推定を上書きする('default' は repo 省略=デフォルト)。
-    base_branch 指定時は起点ブランチとして契約に書く(空=現在の HEAD 起点)。"""
+    base_branch 指定時は起点ブランチとして契約に書く(空=現在の HEAD 起点)。
+    no_pr=True は promote(PR 提出)を抑止するフラグを契約に書く(ローカル検証用)。"""
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
     # 生成中であることを Web が決定論的に検出するためのロック(完了で必ず外す)。
@@ -841,6 +842,8 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
                 fm["repo"] = repo
         if (base_branch or "").strip():
             fm["base_branch"] = base_branch.strip()
+        if no_pr:
+            fm["no_pr"] = True
         p = write_task(tid, fm, str(obj.get("notes", "") or ""))
         paths = [p]
         plan = str(obj.get("plan", "") or "").strip()
@@ -1932,8 +1935,10 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         committed = commit_worktree(wt, f"loop run {run_id} → {final}")
 
         # 6) promote: pass なら PR 化し CI + Copilot が green になるまで Implementer を差し戻し(種類A)。
+        #    task.no_pr=true は PR を出さず loop/<id> ブランチのまま留める(ローカル検証用)。
         promote_info = None
-        if final == "pass" and loop.get("promote_on_pass") and committed:
+        no_pr = str(task.get("no_pr", "")).lower() in ("true", "1", "yes")
+        if final == "pass" and loop.get("promote_on_pass") and committed and not no_pr:
             write_run_status(run_id=run_id, phase="promote")
             print("  · promote: PR 提出 → CI/Copilot 対応 …")
             promote_info = promote_run(task, run_id, run_dir, repo, wt, branch, cfg, session_id)
@@ -2275,7 +2280,7 @@ def main() -> int:
         def _opt(flag: str) -> str | None:
             return rest[rest.index(flag) + 1] if flag in rest and rest.index(flag) + 1 < len(rest) else None
         return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest,
-                       _opt("--repo"), _opt("--base-branch"))
+                       _opt("--repo"), _opt("--base-branch"), "--no-pr" in rest)
     if cmd == "norms":
         return cmd_norms(sys.argv[2:])
     table = {"reindex": cmd_reindex, "status": cmd_status, "merges": cmd_merges}

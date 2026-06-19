@@ -45,6 +45,8 @@ def generate_task(inp: schemas.GenerateInput):
         args += ["--repo", inp.repo.strip()]
     if inp.base_branch.strip():
         args += ["--base-branch", inp.base_branch.strip()]
+    if inp.no_pr:
+        args.append("--no-pr")
     if inp.auto_run:
         args.append("--run")
     # 生成中ロックを即時に立てる(背景プロセスが lock を作るまでの race を避ける)。cmd_gen が完了で外す。

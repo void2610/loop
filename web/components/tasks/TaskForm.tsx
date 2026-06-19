@@ -19,6 +19,7 @@ export function emptyFields(): TaskFields {
     goal: "",
     repo: "",
     base_branch: "",
+    no_pr: false,
     accept: [],
     verify: "",
     constraints: [],
@@ -51,6 +52,7 @@ export function TaskForm({
   const [goal, setGoal] = useState(initial.goal);
   const [repo, setRepo] = useState(initial.repo);
   const [baseBranch, setBaseBranch] = useState(initial.base_branch || "");
+  const [noPr, setNoPr] = useState(initial.no_pr ?? false);
   const [branches, setBranches] = useState<string[]>([]);
   const [accept, setAccept] = useState<string[]>(initial.accept);
   const [verify, setVerify] = useState(initial.verify);
@@ -94,6 +96,7 @@ export function TaskForm({
       goal,
       repo,
       base_branch: baseBranch,
+      no_pr: noPr,
       accept,
       verify,
       constraints,
@@ -196,6 +199,16 @@ export function TaskForm({
           </datalist>
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={noPr}
+          onChange={(e) => setNoPr(e.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        PR を出さない(ローカル検証用。pass しても promote せず loop/&lt;id&gt; ブランチに留める)
+      </label>
 
       <div className="space-y-1.5">
         <Label htmlFor="goal">

@@ -97,6 +97,7 @@ class TaskFields(BaseModel):
     goal: str
     repo: str
     base_branch: str = ""
+    no_pr: bool = False
     accept: list[str]
     verify: str
     constraints: list[str]
@@ -176,6 +177,7 @@ class TaskInput(BaseModel):
     goal: str = ""
     repo: str = ""
     base_branch: str = ""
+    no_pr: bool = False
     accept: list[str] = []
     verify: str = ""
     constraints: list[str] = []
@@ -212,6 +214,7 @@ class GenerateInput(BaseModel):
     prompt: str = ""
     repo: str = ""
     base_branch: str = ""
+    no_pr: bool = False
     auto_run: bool = False
 
 

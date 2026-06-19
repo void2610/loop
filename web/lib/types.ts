@@ -688,6 +688,11 @@ export interface components {
              */
             base_branch: string;
             /**
+             * No Pr
+             * @default false
+             */
+            no_pr: boolean;
+            /**
              * Auto Run
              * @default false
              */
@@ -1041,6 +1046,11 @@ export interface components {
              * @default
              */
             base_branch: string;
+            /**
+             * No Pr
+             * @default false
+             */
+            no_pr: boolean;
             /** Accept */
             accept: string[];
             /** Verify */
@@ -1080,6 +1090,11 @@ export interface components {
              * @default
              */
             base_branch: string;
+            /**
+             * No Pr
+             * @default false
+             */
+            no_pr: boolean;
             /**
              * Accept
              * @default []

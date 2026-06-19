@@ -261,6 +261,7 @@ def fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
         "goal": fm.get("goal", ""),
         "repo": fm.get("repo", "") or "",
         "base_branch": fm.get("base_branch", "") or "",
+        "no_pr": str(fm.get("no_pr", "")).lower() in ("true", "1", "yes"),
         "accept": fm.get("accept") or [],
         "verify": fm.get("verify", "") or "",
         "constraints": fm.get("constraints") or [],
@@ -272,7 +273,7 @@ def fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
 
 
 def fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: list[str],
-                 allowed_tools, max_attempts, status, base_branch="") -> dict:
+                 allowed_tools, max_attempts, status, base_branch="", no_pr=False) -> dict:
     """フォーム入力 → front-matter dict(順序を固定。空フィールドは省く)。
 
     max_attempts は str 受けのまま int 化失敗時に黙って落とす現挙動を維持(契約後方互換)。
@@ -282,6 +283,8 @@ def fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: li
         fm["repo"] = repo.strip()
     if (base_branch or "").strip():
         fm["base_branch"] = base_branch.strip()
+    if no_pr:  # PR を出さない(ローカル検証用)。既定 false は省略してMDを汚さない
+        fm["no_pr"] = True
     acc = [x.strip() for x in accept if x.strip()]
     if acc:
         fm["accept"] = acc

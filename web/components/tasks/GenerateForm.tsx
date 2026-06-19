@@ -18,6 +18,7 @@ export function GenerateForm({ repos }: { repos: string[] }) {
   const [repo, setRepo] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
+  const [noPr, setNoPr] = useState(false);
   const [autoRun, setAutoRun] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +55,7 @@ export function GenerateForm({ repos }: { repos: string[] }) {
     }
     setSubmitting(true);
     try {
-      await api.generate({ prompt, repo, base_branch: baseBranch, auto_run: autoRun });
+      await api.generate({ prompt, repo, base_branch: baseBranch, no_pr: noPr, auto_run: autoRun });
       // 一覧へ遷移し「生成中」を可視化(TaskList が generating=1 でポーリング表示)。
       const q = autoRun ? "generating=1&autorun=1" : "generating=1";
       router.push(`/tasks?${q}`);
@@ -133,6 +134,16 @@ export function GenerateForm({ repos }: { repos: string[] }) {
           }
         />
       </div>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={noPr}
+          onChange={(e) => setNoPr(e.target.checked)}
+          className="h-4 w-4 rounded border-input"
+        />
+        PR を出さない(ローカル検証用。pass しても promote しない)
+      </label>
 
       <label className="flex items-center gap-2 text-sm">
         <input
