@@ -29,13 +29,29 @@ web-build:
 #   - tailscaled→localhost→backend で接続元は常に 127.0.0.1。webapp は proxy_headers=False なので
 #     X-Forwarded で汚染されず auth は loopback 素通し(§7 の Bearer は未設定でよい)。
 #   - 経路の暗号化・デバイス認証は Tailscale(WireGuard)に委ねる。
-# 安定性: ① 残存ポートを事前掃除 ② tailscale serve は `--bg` で無音失敗しうるので **status で検証** ③ 終了
-#   時に serve を自動 off にし、設定漏れの中途半端な状態を残さない。
+# 安定性: ① 残存プロセスを pkill+lsof で掃除し **ポートが空くまで待つ**(kill 直後 bind の EADDRINUSE 回避)
+#   ② tailscale serve は `--bg` で無音失敗しうるので **status で検証** ③ backend が **8765 を LISTEN するまで待って**
+#   から node 起動(uvicorn 即死を検出)④ 終了時に serve を自動 off にし、設定漏れの中途半端な状態を残さない。
 app: web-build
     #!/usr/bin/env bash
     set -euo pipefail
-    # 残存 next-server / uvicorn が :3000/:8765 を握ると EADDRINUSE で起動失敗する。先に掃除する
-    lsof -ti tcp:3000 tcp:8765 2>/dev/null | xargs kill -9 2>/dev/null || true
+    # 残存 next-server / uvicorn が :3000/:8765 を握ると EADDRINUSE で起動失敗する。先に掃除する。
+    # 罠: `lsof -ti tcp:3000 tcp:8765` は 2 つ目の tcp:8765 が裸の引数(ファイル名)扱いになり
+    #     status error で **PID を一切返さない** → kill が空振りし旧 node が残る。各ポートに -i が要る。
+    # lsof は片方のポートが空でも exit 1 を返す。set -e 下で死なないよう || true で 0 を保証する(出力は保持)。
+    ports() { lsof -ti tcp:3000 -i tcp:8765 2>/dev/null || true; }
+    pkill -9 -f 'webapp/main.py' 2>/dev/null || true   # uvicorn(まだ LISTEN 前で lsof に出ない個体の保険)
+    # kill 直後に bind すると旧ソケットが残り EADDRINUSE で(特に背景の uvicorn が無音で)死ぬ。
+    # ポートが実際に空くまで kill を繰り返す(exit code は当てにならないので出力の有無で判定)。
+    for i in $(seq 1 50); do
+        p="$(ports)"; [ -z "$p" ] && break
+        echo "$p" | xargs kill -9 2>/dev/null || true
+        sleep 0.2
+    done
+    if [ -n "$(ports)" ]; then
+        echo "✗ :3000/:8765 がまだ使用中です。残存プロセスを手動で停止してください" >&2
+        exit 1
+    fi
     # tailscaled を前段に(ALF 回避)。--bg は非同期 + 冪等で、失敗しても script は止まらないため
     # 直後に `tailscale serve status` で設定反映を検証する(これが無いと「画面は出るが API が 403」になる)
     tailscale serve --bg --http=3000 3000
@@ -51,6 +67,14 @@ app: web-build
     cleanup() { trap - INT TERM EXIT; tailscale serve --http=3000 off >/dev/null 2>&1 || true; kill 0 2>/dev/null || true; }
     trap cleanup INT TERM EXIT
     uv run webapp/main.py &
+    BACKEND_PID=$!
+    # backend(uvicorn)が 8765 を LISTEN するまで待つ。先に node を出すと proxy が ECONNREFUSED を吐き、
+    # uvicorn が EADDRINUSE 等で即死しても「画面は出るが API だけ死ぬ」状態に気づけない。
+    for i in $(seq 1 50); do
+        curl -fsS -o /dev/null http://127.0.0.1:8765/openapi.json 2>/dev/null && break
+        kill -0 "$BACKEND_PID" 2>/dev/null || { echo "✗ backend(uvicorn)が起動に失敗しました(EADDRINUSE 等)" >&2; exit 1; }
+        sleep 0.3
+    done
     HOSTNAME=127.0.0.1 PORT=3000 node web/.next/standalone/server.js
 
 # loop.db を破棄し runs/*.md から完全再生成(ビューは捨ててよい)
