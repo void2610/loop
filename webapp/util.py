@@ -357,6 +357,24 @@ def evidence_file_path(run_id: str, name: str) -> Path | None:
     return p
 
 
+# Claude Code のスラッシュコマンド呼び出しが付ける機械的エンベロープ。中身(command-args)が実プロンプト。
+_CMD_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
+_CMD_NAME_RE = re.compile(r"<command-name>(.*?)</command-name>", re.DOTALL)
+_CMD_TAG_RE = re.compile(r"</?command-(?:message|name|args)>")
+
+
+def _unwrap_command(text: str) -> tuple[str, str | None]:
+    """`<command-args>` で包まれたプロンプトから実中身と起動スキル名を取り出す(markdown が壊れないよう envelope を剥がす)。"""
+    nm = _CMD_NAME_RE.search(text)
+    name = nm.group(1).strip() if nm else None
+    m = _CMD_ARGS_RE.search(text)
+    if m:
+        rest = text[m.end():].strip()
+        inner = m.group(1).strip()
+        return (f"{inner}\n\n{rest}" if rest else inner), name
+    return _CMD_TAG_RE.sub("", text), name
+
+
 def parse_transcript(path: Path) -> list[dict]:
     """セッション JSONL を会話イベント列に畳む(user/assistant のみ)。REST/SSE 共有。"""
     events: list[dict] = []
@@ -376,7 +394,9 @@ def parse_transcript(path: Path) -> list[dict]:
         ts = (o.get("timestamp") or "")[11:19]
         content = msg.get("content")
         if isinstance(content, str):
-            events.append({"cls": "user", "label": "プロンプト", "body": content, "ts": ts})
+            body, skill = _unwrap_command(content)
+            label = f"プロンプト · {skill}" if skill else "プロンプト"
+            events.append({"cls": "user", "label": label, "body": body, "ts": ts})
             continue
         for b in content or []:
             if not isinstance(b, dict):
