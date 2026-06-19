@@ -983,6 +983,11 @@ export interface components {
             goal: string;
             /** Repo */
             repo: string;
+            /**
+             * Base Branch
+             * @default
+             */
+            base_branch: string;
             /** Accept */
             accept: string[];
             /** Verify */
@@ -1017,6 +1022,11 @@ export interface components {
              * @default
              */
             repo: string;
+            /**
+             * Base Branch
+             * @default
+             */
+            base_branch: string;
             /**
              * Accept
              * @default []

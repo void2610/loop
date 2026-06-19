@@ -96,6 +96,7 @@ class TaskFields(BaseModel):
     task_id: str
     goal: str
     repo: str
+    base_branch: str = ""
     accept: list[str]
     verify: str
     constraints: list[str]
@@ -161,6 +162,7 @@ class TaskInput(BaseModel):
     task_id: str | None = None  # POST 時のみ。PUT は path から取る
     goal: str = ""
     repo: str = ""
+    base_branch: str = ""
     accept: list[str] = []
     verify: str = ""
     constraints: list[str] = []

@@ -18,6 +18,7 @@ export function emptyFields(): TaskFields {
     task_id: "",
     goal: "",
     repo: "",
+    base_branch: "",
     accept: [],
     verify: "",
     constraints: [],
@@ -49,6 +50,7 @@ export function TaskForm({
   const [taskId, setTaskId] = useState(initial.task_id);
   const [goal, setGoal] = useState(initial.goal);
   const [repo, setRepo] = useState(initial.repo);
+  const [baseBranch, setBaseBranch] = useState(initial.base_branch || "");
   const [accept, setAccept] = useState<string[]>(initial.accept);
   const [verify, setVerify] = useState(initial.verify);
   const [constraints, setConstraints] = useState<string[]>(initial.constraints);
@@ -74,6 +76,7 @@ export function TaskForm({
       task_id: isNew ? taskId : null,
       goal,
       repo,
+      base_branch: baseBranch,
       accept,
       verify,
       constraints,
@@ -132,25 +135,42 @@ export function TaskForm({
         </div>
       )}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="repo">
-          repo{" "}
-          <span className="font-normal text-muted-foreground">
-            (対象リポジトリ。登録名 or 絶対パス。外部FS作業は none。空=デフォルト)
-          </span>
-        </Label>
-        <Input
-          id="repo"
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          list="repolist"
-          placeholder="(デフォルト)"
-        />
-        <datalist id="repolist">
-          {repos.map((r) => (
-            <option key={r} value={r} />
-          ))}
-        </datalist>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="repo">
+            repo{" "}
+            <span className="font-normal text-muted-foreground">
+              (対象リポジトリ。登録名 or 絶対パス。外部FS作業は none。空=デフォルト)
+            </span>
+          </Label>
+          <Input
+            id="repo"
+            value={repo}
+            onChange={(e) => setRepo(e.target.value)}
+            list="repolist"
+            placeholder="(デフォルト)"
+          />
+          <datalist id="repolist">
+            {repos.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="base_branch">
+            base_branch{" "}
+            <span className="font-normal text-muted-foreground">
+              (起点ブランチ。loop/&lt;id&gt; をここから切る。空=現在の HEAD)
+            </span>
+          </Label>
+          <Input
+            id="base_branch"
+            value={baseBranch}
+            onChange={(e) => setBaseBranch(e.target.value)}
+            placeholder="(HEAD)"
+          />
+        </div>
       </div>
 
       <div className="space-y-1.5">

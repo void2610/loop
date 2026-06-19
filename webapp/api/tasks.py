@@ -57,7 +57,8 @@ def create_task(inp: schemas.TaskInput):
     if (runner.TASKS_DIR / f"{tid}.md").exists():
         raise HTTPException(409, err("exists", f"既に存在します: {tid}"))
     fm = util.fm_from_form(tid, inp.goal, inp.repo, inp.accept, inp.verify,
-                           inp.constraints, inp.allowed_tools, inp.max_attempts, inp.status)
+                           inp.constraints, inp.allowed_tools, inp.max_attempts, inp.status,
+                           inp.base_branch)
     p = runner.write_task(tid, fm, inp.body)
     runner.auto_commit(runner.DATA, [p], f"todo: {tid} を新規作成")
     return schemas.TaskIdResult(task_id=tid)
@@ -67,7 +68,8 @@ def create_task(inp: schemas.TaskInput):
             openapi_extra={"x-loop-kind": "A"})
 def update_task(inp: schemas.TaskInput, task_id: str = Depends(valid_task_id)):
     fm = util.fm_from_form(task_id, inp.goal, inp.repo, inp.accept, inp.verify,
-                           inp.constraints, inp.allowed_tools, inp.max_attempts, inp.status)
+                           inp.constraints, inp.allowed_tools, inp.max_attempts, inp.status,
+                           inp.base_branch)
     p = runner.write_task(task_id, fm, inp.body)
     runner.auto_commit(runner.DATA, [p], f"todo: {task_id} を編集")
     return schemas.TaskIdResult(task_id=task_id)

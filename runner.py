@@ -351,14 +351,30 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
 
-def add_worktree(repo: Path, run_id: str) -> tuple[Path, str]:
+def resolve_base_ref(repo: Path, base_branch: str | None) -> str | None:
+    """task の base_branch を worktree/serial の起点 commit-ish に解決する。
+    未指定 → None(従来どおり HEAD 起点)。ローカルに在れば そのまま / origin にのみ在れば origin/<branch>。
+    どこにも無ければ ValueError(死角を作らず run を fail させる)。"""
+    b = (base_branch or "").strip()
+    if not b:
+        return None
+    if git(repo, "rev-parse", "--verify", "--quiet", b).returncode == 0:
+        return b
+    remote = f"origin/{b}"
+    if git(repo, "rev-parse", "--verify", "--quiet", remote).returncode == 0:
+        return remote
+    raise ValueError(f"base_branch '{b}' が repo に存在しません(ローカル / origin いずれにも無い)")
+
+
+def add_worktree(repo: Path, run_id: str, base_ref: str | None = None) -> tuple[Path, str]:
     # 対象 repo に依らず loop repo 内の固定ディレクトリに置く(.gitignore 済み)。
     wt = WORKTREES_DIR / run_id
     branch = f"loop/{run_id}"
     WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+    start = base_ref or "HEAD"  # base_branch 指定時はそこを起点に loop/<id> を切る
     with _wt_lock(repo):  # 同一 repo への並行 worktree add を直列化(共有 .git のメタ競合回避)
         subprocess.run(
-            ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt), "HEAD"],
+            ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt), start],
             check=True, capture_output=True, text=True,
         )
     return wt, branch
@@ -381,13 +397,14 @@ def _serial_lock(repo: Path) -> threading.Lock:
         return _SERIAL_LOCKS.setdefault(key, threading.Lock())
 
 
-def enter_serial(repo: Path, run_id: str) -> tuple[Path, str, str]:
+def enter_serial(repo: Path, run_id: str, base_ref: str | None = None) -> tuple[Path, str, str]:
     """serial repo: worktree を作らず repo 本体に loop/<id> ブランチを切って作業する。
     作業ツリーは触らずブランチポインタだけ付け替える(Unity の Library 等を再 import させない)。
+    base_ref 指定時はそこを起点に切る(未指定は現在の HEAD 起点)。
     返り値 (workdir=repo, branch, orig_ref)。同時 1 本は呼び出し側の _serial_lock が担保する。"""
     branch = f"loop/{run_id}"
     orig_ref = git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "HEAD"
-    git(repo, "checkout", "-B", branch)
+    git(repo, "checkout", "-B", branch, *( [base_ref] if base_ref else [] ))
     return repo, branch, orig_ref
 
 
@@ -1471,10 +1488,10 @@ def _default_branch(repo: Path) -> str:
     return _gh(["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"], repo).stdout.strip() or "main"
 
 
-def open_pr(repo: Path, branch: str, title: str, body: str) -> tuple[int | None, str]:
-    """branch を push して PR を作る。既存 PR があればそれを返す。"""
+def open_pr(repo: Path, branch: str, title: str, body: str, base: str | None = None) -> tuple[int | None, str]:
+    """branch を push して PR を作る。既存 PR があればそれを返す。base 未指定はデフォルトブランチ。"""
     git(repo, "push", "-u", "origin", branch)
-    base = _default_branch(repo)
+    base = (base or "").strip() or _default_branch(repo)
     p = _gh(["pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body], repo)
     if p.returncode == 0:
         url = p.stdout.strip().splitlines()[-1]
@@ -1579,7 +1596,7 @@ def promote_run(task: dict, run_id: str, run_dir: Path, repo: Path, wt: Path,
     slug = _repo_slug(repo)
     title = f"{task['id']}: {str(task.get('goal', '')).strip().splitlines()[0][:60]}"
     body = f"loop run `{run_id}` の成果(Verifier 監査 pass)。\n\n🤖 loop により自動生成。**merge は人間が判断**。"
-    pr, url = open_pr(repo, branch, title, body)
+    pr, url = open_pr(repo, branch, title, body, base=(task.get("base_branch") or "").strip() or None)
     if not pr:
         return {"state": "error", "detail": "PR 作成に失敗"}
     request_copilot(repo, slug, pr)
@@ -1762,6 +1779,20 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         print(f"  · repo が不正: {repo} → fail")
         return "fail", False
 
+    # base_branch 指定があれば worktree/serial の起点をそこへ(未指定は従来どおり HEAD)。無効 ref は run を fail。
+    try:
+        base_ref = resolve_base_ref(repo, task.get("base_branch"))
+    except ValueError as ex:
+        (run_dir / "test-output.txt").write_text(f"NG: {ex}\n", encoding="utf-8")
+        write_run_status(run_id=run_id, task=task["id"], repo=str(repo),
+                         started_at=started_at, phase="verifier", verdict=None)
+        md = write_run_md(task, run_id, "fail", None, cfg, started_at, None,
+                          "none", "handoff", None, {}, repo=repo)
+        _finalize_run(task, run_id, run_dir, md, "fail", f"run: {run_id} → fail(base_branch 不正)")
+        clear_run_status(run_id, "fail")
+        print(f"  · {ex} → fail")
+        return "fail", False
+
     # serial repo は worktree を作らず本体で 1 本ずつ作業する(Unity 等の worktree 不向き repo)。
     # 同一 serial repo の同時実行はロックで直列化(他 repo / parallel worktree は並行のまま)。
     serial = repo_mode(repo, cfg) == "serial"
@@ -1770,9 +1801,9 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         lock.acquire()
     try:
         if serial:
-            wt, branch, orig_ref = enter_serial(repo, run_id)
+            wt, branch, orig_ref = enter_serial(repo, run_id, base_ref)
         else:
-            wt, branch, orig_ref = (*add_worktree(repo, run_id), None)
+            wt, branch, orig_ref = (*add_worktree(repo, run_id, base_ref), None)
     except BaseException:
         if lock:
             lock.release()

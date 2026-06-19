@@ -188,6 +188,7 @@ def fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
         "task_id": task_id,
         "goal": fm.get("goal", ""),
         "repo": fm.get("repo", "") or "",
+        "base_branch": fm.get("base_branch", "") or "",
         "accept": fm.get("accept") or [],
         "verify": fm.get("verify", "") or "",
         "constraints": fm.get("constraints") or [],
@@ -199,7 +200,7 @@ def fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
 
 
 def fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: list[str],
-                 allowed_tools, max_attempts, status) -> dict:
+                 allowed_tools, max_attempts, status, base_branch="") -> dict:
     """フォーム入力 → front-matter dict(順序を固定。空フィールドは省く)。
 
     max_attempts は str 受けのまま int 化失敗時に黙って落とす現挙動を維持(契約後方互換)。
@@ -207,6 +208,8 @@ def fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: li
     fm: dict = {"id": task_id, "goal": (goal or "").strip("\n")}
     if (repo or "").strip():
         fm["repo"] = repo.strip()
+    if (base_branch or "").strip():
+        fm["base_branch"] = base_branch.strip()
     acc = [x.strip() for x in accept if x.strip()]
     if acc:
         fm["accept"] = acc
