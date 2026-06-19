@@ -128,6 +128,7 @@ just web-build    # フロント本番ビルド(standalone に static 同梱)
 ## 7. コスト感(ライブ実行)
 
 - 1 run = 3 モデル呼び出し(Explorer haiku + Implementer sonnet + **Verifier opus**)。hello-loop 規模で **~$0.5**。生成は **~$0.05–0.1**。
+- **検証・テスト実行はトークンを消費しても確認を取らず自動でやってよい**(ユーザー許可済み)。実装の正しさは実際に動かして証拠で示すのが優先。コスト確認が要るのは下の「大きめのライブ実行・実 repo への run」だけ。
 - **大きめのライブ実行・実 repo への run は、必要性とコストを一言添えて確認**してから。検証目的の最小 run は妥当。
 - **長尺タスクは background 実行**(Web の実行ボタン / `runner run <id>` を Popen)。フォアグラウンドで回すとツールのタイムアウト(例: 600s)で SIGKILL される(過去に発生)。`just app` 等は `run_in_background` で。
 - run が SIGKILL されても設計上はデータ損失ゼロ・バックアップ健在・決定論ゲートで安全側に倒れる(organize-downloads の中断時に確認済み)。
