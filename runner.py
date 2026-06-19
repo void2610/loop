@@ -208,21 +208,32 @@ def goal_contract_sha(task: dict) -> str:
 
 # --- プロンプト生成 ---
 
+# プロンプトの prose 本体は .claude/plugins/loop-roles/templates/*.md に外出し済み。
+# Python は動的セクション(条件付き行 / 配列の整形)だけ組み立て、.format() で流す。
+TEMPLATES = ROOT / ".claude" / "plugins" / "loop-roles" / "templates"
+
+
+def _read_template(name: str) -> str:
+    return (TEMPLATES / name).read_text(encoding="utf-8")
+
+
+def _bullet_section(header: str, items: list, prefix: str = "- ") -> str:
+    items = [str(x) for x in (items or []) if str(x).strip()]
+    if not items:
+        return ""
+    return f"\n\n# {header}\n" + "\n".join(f"{prefix}{x}" for x in items)
+
+
 def render_prompt(task: dict) -> str:
-    parts = [
-        "あなたは隔離された git worktree 内で作業しています。次のゴールを達成してください。",
-        "",
-        f"# ゴール\n{task['goal']}",
-    ]
-    if task.get("accept"):
-        parts.append("\n# 受け入れ基準(すべて満たすこと)\n" + "\n".join(f"- {a}" for a in task["accept"]))
-    if task.get("constraints"):
-        parts.append("\n# 制約(違反しないこと)\n" + "\n".join(f"- {c}" for c in task["constraints"]))
-    if task.get("verify"):
-        parts.append(
-            f"\n# 検証\n作業完了後、次のコマンドが exit 0 になることが合格条件です(別プロセスで検証されます): `{task['verify']}`"
-        )
-    return "\n".join(parts)
+    accept_block = _bullet_section("受け入れ基準(すべて満たすこと)", task.get("accept") or [])
+    constraints_block = _bullet_section("制約(違反しないこと)", task.get("constraints") or [])
+    verify = task.get("verify")
+    verify_block = (
+        f"\n\n# 検証\n作業完了後、次のコマンドが exit 0 になることが合格条件です(別プロセスで検証されます): `{verify}`"
+        if verify else "")
+    return _read_template("task-contract.md").format(
+        goal=task["goal"], accept_block=accept_block,
+        constraints_block=constraints_block, verify_block=verify_block).rstrip() + "\n"
 
 
 def render_implementer_prompt(task: dict, context: str, source: str = "Author の実装プラン", brief: str = "") -> str:
@@ -255,17 +266,13 @@ def render_revise_prompt(task: dict, verifier_obj: dict | None) -> str:
     """Verifier の差し戻し(revise)を受けた Implementer への追加指示(--resume で前文脈を保持)。"""
     obj = verifier_obj or {}
     reasons = str(obj.get("reasons", "")).strip() or "(理由未記載)"
-    changes = [str(c).strip() for c in (obj.get("required_changes") or []) if str(c).strip()]
-    parts = [
-        "独立した Verifier(別モデル)があなたの実装を監査し、**差し戻し(revise)**と判定しました。",
-        "あなたはこの worktree で実装を続けています。下の指摘に対応し、再度テストを通してから完了してください。",
-        f"\n# 差し戻し理由\n{reasons}",
-    ]
-    if changes:
-        parts.append("\n# 要対応\n" + "\n".join(f"- {c}" for c in changes))
-    if task.get("verify"):
-        parts.append(f"\n# 検証\n修正後、`{task['verify']}` が exit 0 になることを自分で確認してから完了してください。")
-    return "\n".join(parts)
+    changes_block = _bullet_section("要対応", obj.get("required_changes") or [])
+    verify = task.get("verify")
+    verify_block = (
+        f"\n\n# 検証\n修正後、`{verify}` が exit 0 になることを自分で確認してから完了してください。"
+        if verify else "")
+    return _read_template("revise.md").format(
+        reasons=reasons, changes_block=changes_block, verify_block=verify_block).rstrip() + "\n"
 
 
 def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: str = "",
@@ -1027,29 +1034,37 @@ def _run_summary_for_norms(run_id: str, repo: Path) -> str:
     """起草エージェントへ渡す構造化サマリ(front-matter + diff + 差し戻し理由)。
     生 transcript も人間の review-notes も渡さない(poisoning と種類B 侵食を防ぐ)。"""
     md = RUNS / f"{run_id}.md"
-    fm = loopdb.parse_front_matter(md.read_text(encoding="utf-8")) if md.exists() else {}
+    md_text = md.read_text(encoding="utf-8") if md.exists() else ""
+    fm = loopdb.parse_front_matter(md_text) if md_text else {}
     keys = ("task", "verdict", "test_verdict", "verifier_verdict", "verifier_confidence")
     head = "\n".join(f"- {k}: {fm[k]}" for k in keys if fm.get(k))
-    parts = [f"# run のサマリ(構造化)\n- run_id: {run_id}\n{head}"]
-    md_text = md.read_text(encoding="utf-8") if md.exists() else ""
+
+    goal_block = ""
     if "## 目標契約" in md_text:
         goal = md_text.split("## 目標契約", 1)[1].split("##", 1)[0].strip()
-        parts.append(f"# 目標契約\n{goal[:1500]}")
+        goal_block = f"\n\n# 目標契約\n{goal[:1500]}"
+
+    verifier_block = ""
     vj = RUNS / run_id / "verifier.json"
     if vj.exists():
         try:
             obj = json.loads(vj.read_text(encoding="utf-8"))
             rc = [str(c) for c in (obj.get("required_changes") or [])]
-            parts.append("# Verifier の指摘(差し戻し/判定理由)\n"
-                         f"- reasons: {_norm_oneline(obj.get('reasons', ''))[:800]}\n"
-                         + ("- required_changes:\n" + "\n".join(f"  - {c}" for c in rc) if rc else ""))
+            verifier_block = ("\n\n# Verifier の指摘(差し戻し/判定理由)\n"
+                              f"- reasons: {_norm_oneline(obj.get('reasons', ''))[:800]}\n"
+                              + ("- required_changes:\n" + "\n".join(f"  - {c}" for c in rc) if rc else ""))
         except json.JSONDecodeError:
             pass
+
+    diff_block = ""
     patch = RUNS / run_id / "change.patch"
     if patch.exists():
-        parts.append("# 実装の diff(抜粋)\n```diff\n"
+        diff_block = ("\n\n# 実装の diff(抜粋)\n```diff\n"
                       + patch.read_text(encoding="utf-8", errors="replace")[:5000] + "\n```")
-    return "\n\n".join(parts)
+
+    return _read_template("norm-summary.md").format(
+        run_id=run_id, head=head, goal_block=goal_block,
+        verifier_block=verifier_block, diff_block=diff_block).rstrip() + "\n"
 
 
 def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> dict | None:
