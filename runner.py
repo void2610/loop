@@ -270,44 +270,22 @@ def render_revise_prompt(task: dict, verifier_obj: dict | None) -> str:
 
 def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: str = "",
                            human_input: str = "") -> str:
+    # 役の振る舞いは `.claude/plugins/loop-roles/skills/verifier/SKILL.md` に外出し済み(disable-model-invocation)。
+    # runner からは slash で明示呼び出し → Claude Code が入力レイヤで $ARGUMENTS を skill 本文へ展開する。
     accept = "\n".join(f"- {a}" for a in (task.get("accept") or [])) or "(明示なし)"
     constraints = "\n".join(f"- {c}" for c in (task.get("constraints") or [])) or "(なし)"
-    human_section = ""
+    parts = [
+        f"## ゴール\n{task['goal']}",
+        f"## 受け入れ基準(すべて満たすこと)\n{accept}",
+        f"## 制約(違反していないか)\n{constraints}",
+        f"## 実装の diff\n```diff\n{diff_text[:6000]}\n```",
+        f"## 決定論テストの出力\n{test_output[:4000]}",
+    ]
     if human_input.strip():
-        human_section = (
-            "\n# 人間の介入(承認・決定)\n"
-            "以下は**人間(種類B)が Web から与えた指示・承認**であり、実装者の自己申告ではない(信頼してよい権威)。\n"
-            "「人間の承認が要る/ポリシー決定」という基準は、この内容に照らして満たされているか判定すること"
-            "(実装が人間の承認した内容と一致しているかは引き続き diff/ファイルで検証する)。\n"
-            f"{human_input.strip()}\n")
-    return f"""あなたは独立した受け入れ判定者(Verifier)です。**実装者の自己申告を信じてはいけません。**
-受け入れ基準を 1 つずつ、下の diff と検証出力、および worktree 内の実ファイル(Read/Grep/Glob 可)に照らして検証してください。
-テストを通すためだけの gaming(本質を解かずテストを書き換える等)や、spec の部分的未達を積極的に疑ってください。
-**決定論テスト(verify)自体の妥当性も批判的に監査**してください — テストが本質を検証しておらず空通りしているなら、たとえ exit 0 でも pass にしないこと。
-判定はスキーマに従い構造化出力で返してください。
-- `pass`: 受け入れ基準を満たし、テストも妥当。
-- `fail`: 本質的に達成不能・方向性が誤り(直しても通せない見込み)。
-- `revise`: 実装を直せば通せる見込み。`required_changes` に具体的な修正指示を書く(実装者が同一セッションで対応する)。
-- `handoff`: 自動判定では確証できず人間の判断が要る。
-
-# ゴール
-{task['goal']}
-
-# 受け入れ基準(すべて満たすこと)
-{accept}
-
-# 制約(違反していないか)
-{constraints}
-
-# 実装の diff
-```diff
-{diff_text[:6000]}
-```
-
-# 決定論テストの出力
-{test_output[:4000]}
-{human_section}{brief}
-"""
+        parts.append(f"## 人間の介入(承認・決定)\n{human_input.strip()}")
+    if brief:
+        parts.append(brief.lstrip("\n"))  # build_norms_brief / build_repo_brief は冒頭に見出し付き
+    return "/loop-roles:verifier " + "\n\n".join(parts)
 
 
 # --- git / リポジトリ解決 ---
@@ -705,7 +683,6 @@ def judge_with_verifier(task: dict, wt: Path, run_dir: Path, cfg: dict,
 
 # --- タスク生成(自然言語 → 目標契約。専用 skill + 構造化出力) ---
 
-TASK_AUTHOR_SKILL = ROOT / ".claude" / "skills" / "task-author" / "SKILL.md"
 
 TASK_GEN_SCHEMA = {
     "type": "object",
@@ -732,20 +709,16 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
     agents, loop = cfg["agents"], cfg["loop"]
     model = agents.get("author_model") or agents["implementer_model"]
     inspect = repo_path is not None and repo_path.is_dir()
-    # 「実行せず変換せよ」を明示。これが無いと依頼内容(例: ファイル作成)を実際にやろうとして
-    # read-only 拒否 → リトライで turn を空回りし遅くなる。repo 自体は UI 選択(モデルに推定させない)。
-    wrapped = ("次の依頼を loop の『目標契約(タスク定義)』に変換し、構造化出力で返してください。"
-               "**ファイルの作成・編集・コマンド実行は一切しないでください。設計だけ**です。\n\n")
+    # 役定義は task-author skill(disable-model-invocation: true)に外出し済み。
+    # runner は slash で明示呼び出しし、依頼と repo 文脈を $ARGUMENTS に詰める。
+    parts = [f"## 依頼\n{prompt}"]
     if inspect:
-        wrapped += (f"あなたは対象リポジトリ `{repo_path}` の中で **read-only** で実行されています。"
-                    "Read/Grep/Glob で実際の構成・テスト/ビルド方法(justfile・package.json・Makefile・テスト位置など)を調べ、"
-                    "**その repo で実際に exit 0 になる `verify` コマンド**と、repo の実情に即した具体的な `accept` を書いてください。"
-                    "プレースホルダや当て推量は禁止です。\n"
-                    "さらに、調査結果を踏まえた**詳細な実装プランを `plan` に書いてください**(Explorer の事前調査を兼ねる): "
-                    "変更すべきファイルと具体的な手順、触る関数/箇所、想定リスク、確認方法。実装者がこれを読んで着手できる粒度で。\n\n")
+        parts.insert(0, f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。")
         # 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は CLAUDE.md > 規範 > 事実。
-        wrapped += build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
-    wrapped += "\n# 依頼\n" + prompt
+        brief = build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
+        if brief.strip():
+            parts.append(brief.lstrip("\n"))
+    wrapped = "/loop-roles:task-author " + "\n\n".join(parts)
     cmd = [
         "claude", "-p", wrapped,
         "--output-format", "json",
@@ -756,9 +729,8 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
         "--allowedTools", "Read", "Grep", "Glob",  # 生成は read-only 調査のみ
         "--disallowedTools", *WRITE_TOOLS,  # global settings の Write/Bash を上書きして read-only 強制
         "--json-schema", json.dumps(TASK_GEN_SCHEMA, ensure_ascii=False),
+        "--plugin-dir", str(ROOT / ".claude" / "plugins" / "loop-roles"),
     ]
-    if TASK_AUTHOR_SKILL.exists():
-        cmd += ["--append-system-prompt", TASK_AUTHOR_SKILL.read_text(encoding="utf-8")]
     cwd = str(repo_path) if inspect else str(ROOT)
     try:
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
@@ -1086,18 +1058,9 @@ def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> d
     loop, agents = cfg["loop"], cfg["agents"]
     model = agents.get("author_model") or agents["implementer_model"]
     summary = _run_summary_for_norms(run_id, repo)
-    prompt = (
-        "あなたは loop の『規範候補起草者』です。下の run で観察された**摩擦**(期待とのズレ・差し戻し・判定不能)から、"
-        "このリポジトリで今後**どう振る舞うべきか**という一般化された規範(手続き的記憶)の**候補**を起草してください。\n"
-        "**ファイルの作成・編集・コマンド実行は一切しないでください**(あなたに確定権はありません。起草のみ)。\n"
-        "必要なら Read/Grep/Glob で repo の実構成を read-only で確認して構いませんが、"
-        "**人間の review-notes.md は読まないでください**(人間の判断を学習に混ぜない)。\n\n"
-        "規範の条件:\n"
-        "- exit code では検証できない『設計・思想・振る舞い』レベルの規範であること(運用上の一過性エラーは対象外)。\n"
-        "- 『〜する』という能動的な決定手続きの形に一般化すること(この run 固有のエピソードのまま貯めない)。\n"
-        "- 一般化できる摩擦が無ければ candidates を空配列にし、none_reason に理由を書くこと(無理に作らない)。\n\n"
-        f"# トリガー\n{trigger}\n\n{summary}"
-    )
+    # 役定義は norm-drafter skill(disable-model-invocation: true)に外出し済み。
+    # runner は slash で明示呼び出しし、トリガー / 摩擦サマリを $ARGUMENTS に詰める。
+    prompt = f"/loop-roles:norm-drafter ## トリガー\n{trigger}\n\n{summary}"
     cmd = [
         "claude", "-p", prompt,
         "--output-format", "json",
@@ -1108,6 +1071,7 @@ def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> d
         "--allowedTools", "Read", "Grep", "Glob",
         "--disallowedTools", *WRITE_TOOLS,  # global settings を上書きして read-only 強制(起草のみ)
         "--json-schema", json.dumps(NORMS_DRAFT_SCHEMA, ensure_ascii=False),
+        "--plugin-dir", str(ROOT / ".claude" / "plugins" / "loop-roles"),
     ]
     try:
         proc = subprocess.run(cmd, cwd=str(repo), capture_output=True, text=True,
