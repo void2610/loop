@@ -95,10 +95,13 @@ just web-build    # フロント本番ビルド(standalone に static 同梱)
 ```
 
 **起動の不変条件(`app` 内で機械的に守る)**:
-1. 起動前に `:3000 / :8765` の残存プロセスを kill(EADDRINUSE 予防)。
+1. 起動前に `:3000 / :8765` の残存プロセスを **ポートが空くまで** kill(EADDRINUSE 予防)。さらに backend は **8765 を LISTEN するまで待ってから** node を起動(uvicorn 即死を検出)。
 2. `tailscale serve --bg` 後に **`tailscale serve status` で設定反映を検証** し、無音失敗を許さない。
 3. EXIT/INT/TERM の trap で `tailscale serve --http=3000 off` も実行 → 永続設定の中途半端を残さない。
 これらを満たさない起動方法(直接 `node` を叩く・`zsh -i -c` でラップする等)は再現しにくい failure mode を踏むので **常に `just app` を使う**。
+- **`lsof` の複数ポート指定は各ポートに `-i` が要る(罠)**: `lsof -ti tcp:3000 tcp:8765` は 2 つ目の `tcp:8765` が**裸の引数(ファイル名)扱い**になり `status error ... No such file or directory` で **PID を一切返さず**、`xargs kill` が空振りする(= 旧 node が一度も殺されず再起動が EADDRINUSE で死ぬ真因だった)。正しくは `lsof -ti tcp:3000 -i tcp:8765`。
+- **`lsof` は片方のポートが空でもマッチ時に exit 1 を返す**: `set -e` 下で `p="$(lsof ...)"` がそのまま recipe を即死させる。ヘルパは `|| true` で exit 0 を保証し、ループ判定は exit code でなく**出力の有無**(`[ -n "$p" ]`)で行う。
+- **standalone Next の常駐 node は起動直後に cmdline を `next-server (v15.3.3)` へ改名する**: `pkill -f 'standalone/server.js'` では掴めない。掃除は**ポート経由(lsof)を主**にする。
 
 - **開発中は `just app` を常駐させる(原則)**。ユーザは手元 / Tailnet から常時アクセスして確認できる必要があるため、Claude Code 側で勝手に kill しない。停止が要るのはユーザ指示か、`web/` を変更してビルド反映のため再起動するときだけ(その時もすぐ起動し直す)。ポート状態の確認は `lsof -i tcp:3000 -i tcp:8765 -nP`、起動済みか curl で `curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/`。
 - **Claude Code から `just app` を background 起動するときの罠**: Bash tool の `run_in_background` / `nohup ... &` だけだと harness の process group 終了で子プロセスが SIGHUP され、recipe の EXIT trap が `tailscale serve off` を踏んで serve 設定が消える。さらに `trap ... INT TERM` 内の `kill 0` が自分に SIGTERM を返し、trap が再帰呼び出しされて「`tailscale serve --http=3000 off` を連打する亡霊 bash」になる(新規 serve 設定をすぐ消す犯人)。回避は ① **Python の `subprocess.Popen(..., start_new_session=True)` で本当に新 session に detach** ② recipe 側の cleanup は **`trap - INT TERM EXIT` で自分の trap を外してから `kill`**(justfile の `app` recipe で対応済)。`tailscale serve status` が空なのに古い `tailscale serve --http=3000 off` がプロセスに居続けたら、その亡霊を `pkill -9 -f 'tailscale serve --http=3000 off'` で殺す。
