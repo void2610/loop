@@ -40,12 +40,14 @@ def monitor_snapshot():
     unreviewed = conn.execute(
         "SELECT COUNT(*) FROM runs WHERE reviewed=0 AND COALESCE(archived,0)=0").fetchone()[0]
     conn.close()
-    pending = sum(1 for t in runner.parse_tasks()
-                  if str(t.get("status", "todo")).lower() == "todo"
-                  and str(t.get("archived", "false")).lower() not in ("true", "1"))
+    queue = util.run_queue()
+    active = util.active_runs()
+    max_concurrency = max(1, int(runner.load_config()["loop"].get("max_concurrency", 1)))
     return schemas.MonitorSnapshot(
-        status=status, recent=[schemas.RunRow(**r) for r in recent],
-        unreviewed=unreviewed, pending=pending, phases=_PHASES)
+        status=status, active=active,
+        queue=[schemas.QueueItem(**q) for q in queue], max_concurrency=max_concurrency,
+        recent=[schemas.RunRow(**r) for r in recent],
+        unreviewed=unreviewed, pending=len(queue), phases=_PHASES)
 
 
 @router.get("/runs/{run_id}/live", response_model=schemas.LiveSnapshot)
@@ -80,14 +82,14 @@ async def stream_monitor(request: Request):
         last_status = None  # 直近に送った status の JSON 文字列(変化検出用)
         known = _run_ids()  # 既知の run。初回スナップショットは run_done にしない
         beat = 0
-        # 接続直後に現状を1本(フロントの「未接続」を即解消)
-        cur = util.read_run_status()
+        # 接続直後に現状を1本(フロントの「未接続」を即解消)。{runs:[...]} で全 active を供給する。
+        cur = {"runs": util.active_runs()}
         last_status = json.dumps(cur, ensure_ascii=False, sort_keys=True)
         yield _sse("status", cur)
         while True:
             if await request.is_disconnected():
                 return
-            cur = util.read_run_status()
+            cur = {"runs": util.active_runs()}
             snap = json.dumps(cur, ensure_ascii=False, sort_keys=True)
             if snap != last_status:
                 last_status = snap

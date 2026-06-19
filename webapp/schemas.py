@@ -119,8 +119,17 @@ class BranchesResponse(BaseModel):
     branches: list[str]
 
 
+class QueueItem(BaseModel):
+    id: str | None = None
+    goal: str | None = None
+    repo: str | None = None
+
+
 class MonitorSnapshot(BaseModel):
-    status: dict[str, Any] | None
+    status: dict[str, Any] | None  # 後方互換: 単一 run ミラー(.run.lock)
+    active: list[dict[str, Any]] = []  # 進行中の全 run(phase != done)
+    queue: list[QueueItem] = []  # 待機中(status=todo)
+    max_concurrency: int = 1
     recent: list[RunRow]
     unreviewed: int
     pending: int

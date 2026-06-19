@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, api, type RunRow } from "@/lib/api";
@@ -24,8 +25,8 @@ export function RunsView() {
   const [dispatching, setDispatching] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [includeArchived, setIncludeArchived] = useState(false);
-  // 実行中 run は loop.db 未登録なので SSE(.run.lock 由来)から取り、一覧の上に出す。
-  const { runs: activeRuns } = useMonitorStream();
+  // 実行中 run は loop.db 未登録なので SSE(status.json 由来)から取り、一覧の上に出す。
+  const { runs: activeRuns, queue, maxConcurrency } = useMonitorStream();
   // 人間の介入待ち(awaiting)は最優先で目立たせる。それ以外の実行中とは分ける。
   const awaitingRuns = activeRuns.filter((r) => r.phase === "awaiting");
   const runningRuns = activeRuns.filter((r) => r.phase !== "awaiting");
@@ -124,12 +125,49 @@ export function RunsView() {
 
       {runningRuns.length > 0 ? (
         <div className="space-y-2">
-          <p className="th-label">実行中(クリックでライブ)</p>
+          <p className="th-label">
+            実行中(クリックでライブ)
+            <span className="ml-2 font-normal tabular-nums text-muted-foreground">
+              {runningRuns.length} / {maxConcurrency} 同時
+            </span>
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             {runningRuns.map((r) => (
               <RunStatusCard key={r.run_id} run={r} />
             ))}
           </div>
+        </div>
+      ) : null}
+
+      {queue.length > 0 ? (
+        <div className="space-y-2">
+          <p className="th-label">
+            待機キュー
+            <span className="ml-2 font-normal tabular-nums text-muted-foreground">
+              {queue.length}
+            </span>
+          </p>
+          <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+            {queue.map((q, i) => (
+              <li key={q.id ?? i} className="flex items-center gap-3 px-3 py-2 text-sm">
+                <span className="w-5 shrink-0 text-right tabular-nums text-muted-foreground">
+                  {i + 1}
+                </span>
+                <Link
+                  href={`/tasks/${encodeURIComponent(q.id ?? "")}`}
+                  className="shrink-0 font-mono text-xs text-foreground underline-offset-2 hover:underline"
+                >
+                  {q.id}
+                </Link>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{q.goal}</span>
+                {q.repo ? (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                    {q.repo}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

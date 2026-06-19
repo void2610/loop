@@ -768,6 +768,23 @@ export interface components {
             status: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Active
+             * @default []
+             */
+            active: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Queue
+             * @default []
+             */
+            queue: components["schemas"]["QueueItem"][];
+            /**
+             * Max Concurrency
+             * @default 1
+             */
+            max_concurrency: number;
             /** Recent */
             recent: components["schemas"]["RunRow"][];
             /** Unreviewed */
@@ -900,6 +917,15 @@ export interface components {
             merged: boolean;
             /** Ci */
             ci?: string | null;
+        };
+        /** QueueItem */
+        QueueItem: {
+            /** Id */
+            id?: string | null;
+            /** Goal */
+            goal?: string | null;
+            /** Repo */
+            repo?: string | null;
         };
         /** ReposResponse */
         ReposResponse: {

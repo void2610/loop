@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { api, type MonitorSnapshot, type RunRow } from "@/lib/api";
+import { api, type MonitorSnapshot, type QueueItem, type RunRow } from "@/lib/api";
 import { subscribeMonitor } from "@/lib/sse";
 
 import { snapshotToRuns, statusToRuns, type RunStatus } from "./normalize";
@@ -10,6 +10,8 @@ import { snapshotToRuns, statusToRuns, type RunStatus } from "./normalize";
 export type MonitorState = {
   runs: RunStatus[];
   recent: RunRow[];
+  queue: QueueItem[];
+  maxConcurrency: number;
   unreviewed: number;
   pending: number;
   phases: string[][];
@@ -21,6 +23,8 @@ export type MonitorState = {
 const INITIAL: MonitorState = {
   runs: [],
   recent: [],
+  queue: [],
+  maxConcurrency: 1,
   unreviewed: 0,
   pending: 0,
   phases: [],
@@ -43,6 +47,8 @@ export function useMonitorStream(token?: string): MonitorState {
       setState((prev) => ({
         ...prev,
         recent: snap.recent ?? [],
+        queue: snap.queue ?? [],
+        maxConcurrency: snap.max_concurrency ?? 1,
         unreviewed: snap.unreviewed ?? 0,
         pending: snap.pending ?? 0,
         phases: snap.phases ?? [],

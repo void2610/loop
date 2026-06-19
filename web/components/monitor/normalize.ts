@@ -63,9 +63,20 @@ export function statusToRuns(data: MonitorStatusData): RunStatus[] {
   return single ? [single] : [];
 }
 
-/** REST の初回スナップショット(MonitorSnapshot.status は単一 or null)を配列へ。 */
+/** REST の初回スナップショットを進行中 run 配列へ。active[](全 run)を優先し、無ければ単一 status へ後退。 */
 export function snapshotToRuns(snap: MonitorSnapshot | null): RunStatus[] {
-  if (!snap || !snap.status) return [];
+  if (!snap) return [];
+  if (Array.isArray(snap.active)) {
+    const out: RunStatus[] = [];
+    for (const item of snap.active) {
+      if (item && typeof item === "object") {
+        const rs = toRunStatus(item as Record<string, unknown>);
+        if (rs) out.push(rs);
+      }
+    }
+    return out;
+  }
+  if (!snap.status) return [];
   const rs = toRunStatus(snap.status as Record<string, unknown>);
   return rs ? [rs] : [];
 }

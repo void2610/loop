@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -180,6 +181,12 @@ def read_run_status(run_id: str | None = None) -> dict | None:
     if run_id is not None and d.get("run_id") != run_id:
         return None
     d.setdefault("phase", "start")
+    _add_elapsed(d)
+    return d
+
+
+def _add_elapsed(d: dict) -> dict:
+    """status dict に started_at からの経過秒 elapsed を付ける(欠損/不正は None)。"""
     st = d.get("started_at")
     if st:
         try:
@@ -189,6 +196,59 @@ def read_run_status(run_id: str | None = None) -> dict | None:
         except ValueError:
             d["elapsed"] = None
     return d
+
+
+def _stale_after_seconds() -> int:
+    """run が「無更新ならもう死んでいる」と判定する上限秒。
+    どの待機フェーズ(implementer turn / awaiting / CI / Copilot)の合計よりも長く取り、
+    legit な待機 run を誤って隠さない。中断・SIGKILL で done 化されなかった status を落とすためだけに使う。"""
+    loop = runner.load_config().get("loop", {})
+    return (int(loop.get("timeout_seconds", 1800))
+            + int(loop.get("intervention_timeout_seconds", 1800))
+            + int(loop.get("ci_timeout_seconds", 1800))
+            + int(loop.get("copilot_timeout_seconds", 600)) + 300)
+
+
+def active_runs() -> list[dict]:
+    """進行中(phase != done)の全 run の status.json を集約して返す(N 本同時の監視用)。
+    真実は各 runs/<id>/status.json。完了は clear_run_status が phase=done にする。
+    SIGKILL 等で done 化されず残った status は、run ディレクトリの無更新時間で stale 判定して除く(削除はしない)。"""
+    out: list[dict] = []
+    if not RUNS.exists():
+        return out
+    stale_after = _stale_after_seconds()
+    now = time.time()
+    for sp in RUNS.glob("*/status.json"):
+        try:
+            d = json.loads(sp.read_text(encoding="utf-8") or "{}")
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(d, dict) or not d.get("run_id"):
+            continue
+        if str(d.get("phase") or "").lower() == "done":
+            continue
+        try:  # run ディレクトリ内の最新更新が閾値より古ければ死んだ run とみなす
+            newest = max((p.stat().st_mtime for p in sp.parent.iterdir() if p.is_file()),
+                         default=sp.stat().st_mtime)
+        except OSError:
+            newest = 0
+        if now - newest > stale_after:
+            continue
+        out.append(_add_elapsed(d))
+    out.sort(key=lambda r: str(r.get("started_at") or ""))
+    return out
+
+
+def run_queue() -> list[dict]:
+    """待機キュー(status=todo・未アーカイブのタスク)を next_todo と同じ並びで返す。"""
+    q: list[dict] = []
+    for t in runner.parse_tasks():
+        if str(t.get("status", "todo")).lower() != "todo":
+            continue
+        if str(t.get("archived", "false")).lower() in ("true", "1"):
+            continue
+        q.append({"id": t.get("id"), "goal": t.get("goal"), "repo": t.get("repo")})
+    return q
 
 
 def fields_from_fm(task_id: str, fm: dict, body: str) -> dict:

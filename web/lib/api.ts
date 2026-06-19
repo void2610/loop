@@ -36,6 +36,7 @@ export type JudgmentInput = Schemas["JudgmentInput"];
 export type GenerateInput = Schemas["GenerateInput"];
 export type ReposResponse = Schemas["ReposResponse"];
 export type BranchesResponse = Schemas["BranchesResponse"];
+export type QueueItem = Schemas["QueueItem"];
 export type MonitorSnapshot = Schemas["MonitorSnapshot"];
 export type LiveSnapshot = Schemas["LiveSnapshot"];
 export type PrStatus = Schemas["PrStatus"];
