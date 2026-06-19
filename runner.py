@@ -347,6 +347,24 @@ def is_git_repo(path: Path) -> bool:
     return path.is_dir() and git(path, "rev-parse", "--git-dir").returncode == 0
 
 
+def list_branches(repo: Path) -> list[str]:
+    """repo のブランチ候補(ローカル + origin/*、origin/ 接頭は剥がして重複除去)。base_branch 選択用。"""
+    if not is_git_repo(repo):
+        return []
+    # full refname で HEAD symref を弾く(origin/HEAD は short だと "origin" になり擦り抜けるため)。
+    out = git(repo, "for-each-ref", "--format=%(refname)\t%(refname:short)", "refs/heads", "refs/remotes")
+    names: list[str] = []
+    for line in out.stdout.splitlines():
+        full, _, short = line.partition("\t")
+        if not short or full.endswith("/HEAD"):
+            continue
+        if short.startswith("origin/"):
+            short = short[len("origin/"):]
+        if short and short not in names:
+            names.append(short)
+    return names
+
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 
@@ -772,9 +790,11 @@ def _safe_task_id(raw: str) -> str:
     return s or "task"
 
 
-def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int:
+def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
+           base_branch: str | None = None) -> int:
     """自然言語の依頼からタスクを生成して data/tasks/ に書き、必要なら実行(background 想定)。
-    repo を明示指定したら(空/None 以外)モデル推定を上書きする('default' は repo 省略=デフォルト)。"""
+    repo を明示指定したら(空/None 以外)モデル推定を上書きする('default' は repo 省略=デフォルト)。
+    base_branch 指定時は起点ブランチとして契約に書く(空=現在の HEAD 起点)。"""
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
     # 生成中であることを Web が決定論的に検出するためのロック(完了で必ず外す)。
@@ -819,6 +839,8 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None) -> int
                 fm.pop("repo", None)
             else:
                 fm["repo"] = repo
+        if (base_branch or "").strip():
+            fm["base_branch"] = base_branch.strip()
         p = write_task(tid, fm, str(obj.get("notes", "") or ""))
         paths = [p]
         plan = str(obj.get("plan", "") or "").strip()
@@ -2250,8 +2272,10 @@ def main() -> int:
         return cmd_run(sys.argv[2] if len(sys.argv) > 2 else None)
     if cmd == "gen":
         rest = sys.argv[3:]
-        repo = rest[rest.index("--repo") + 1] if "--repo" in rest and rest.index("--repo") + 1 < len(rest) else None
-        return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest, repo)
+        def _opt(flag: str) -> str | None:
+            return rest[rest.index(flag) + 1] if flag in rest and rest.index(flag) + 1 < len(rest) else None
+        return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest,
+                       _opt("--repo"), _opt("--base-branch"))
     if cmd == "norms":
         return cmd_norms(sys.argv[2:])
     table = {"reindex": cmd_reindex, "status": cmd_status, "merges": cmd_merges}

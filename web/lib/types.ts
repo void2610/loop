@@ -515,6 +515,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/repos/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Branches */
+        get: operations["list_branches_api_repos_branches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -564,6 +581,11 @@ export interface components {
              * @default true
              */
             archived: boolean;
+        };
+        /** BranchesResponse */
+        BranchesResponse: {
+            /** Branches */
+            branches: string[];
         };
         /**
          * ConventionsInput
@@ -660,6 +682,11 @@ export interface components {
              * @default
              */
             repo: string;
+            /**
+             * Base Branch
+             * @default
+             */
+            base_branch: string;
             /**
              * Auto Run
              * @default false
@@ -1997,6 +2024,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReposResponse"];
+                };
+            };
+        };
+    };
+    list_branches_api_repos_branches_get: {
+        parameters: {
+            query?: {
+                repo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BranchesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

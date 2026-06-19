@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api } from "@/lib/api";
@@ -15,12 +16,30 @@ export function GenerateForm({ repos }: { repos: string[] }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [repo, setRepo] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
+  const [branches, setBranches] = useState<string[]>([]);
   const [autoRun, setAutoRun] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 'none' は専用選択肢として最後に出すので一覧からは除外する(legacy todo_new.html 踏襲)。
   const registered = repos.filter((r) => r.toLowerCase() !== "none");
+
+  // 選択 repo のブランチ候補を取得(base_branch の datalist 用)。none/未選択は空。
+  useEffect(() => {
+    if (!repo || repo.toLowerCase() === "none") {
+      setBranches([]);
+      return;
+    }
+    let live = true;
+    api
+      .repoBranches(repo)
+      .then((r) => live && setBranches(r.branches))
+      .catch(() => live && setBranches([]));
+    return () => {
+      live = false;
+    };
+  }, [repo]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,7 +54,7 @@ export function GenerateForm({ repos }: { repos: string[] }) {
     }
     setSubmitting(true);
     try {
-      await api.generate({ prompt, repo, auto_run: autoRun });
+      await api.generate({ prompt, repo, base_branch: baseBranch, auto_run: autoRun });
       // 一覧へ遷移し「生成中」を可視化(TaskList が generating=1 でポーリング表示)。
       const q = autoRun ? "generating=1&autorun=1" : "generating=1";
       router.push(`/tasks?${q}`);
@@ -76,6 +95,28 @@ export function GenerateForm({ repos }: { repos: string[] }) {
           ))}
           <option value="none">none(外部FS・git なし)</option>
         </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="gen-base-branch">
+          起点ブランチ{" "}
+          <span className="font-normal text-muted-foreground">
+            (任意。既存ブランチを直す場合に選択。空=現在の HEAD)
+          </span>
+        </Label>
+        <Input
+          id="gen-base-branch"
+          value={baseBranch}
+          onChange={(e) => setBaseBranch(e.target.value)}
+          list="gen-branchlist"
+          placeholder="(HEAD)"
+          disabled={!repo || repo.toLowerCase() === "none"}
+        />
+        <datalist id="gen-branchlist">
+          {branches.map((b) => (
+            <option key={b} value={b} />
+          ))}
+        </datalist>
       </div>
 
       <div className="space-y-1.5">

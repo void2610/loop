@@ -38,6 +38,11 @@ def list_repos():
     return schemas.ReposResponse(repos=util.known_repos())
 
 
+@router.get("/repos/branches", response_model=schemas.BranchesResponse)
+def list_branches(repo: str = ""):
+    return schemas.BranchesResponse(branches=util.repo_branches(repo))
+
+
 @router.get("/tasks/{task_id}", response_model=schemas.TaskDetail)
 def task_detail(task_id: str = Depends(valid_task_id)):
     res = runner.read_task(task_id)

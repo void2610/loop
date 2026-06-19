@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { RowListEditor } from "@/components/tasks/RowListEditor";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,7 @@ export function TaskForm({
   const [goal, setGoal] = useState(initial.goal);
   const [repo, setRepo] = useState(initial.repo);
   const [baseBranch, setBaseBranch] = useState(initial.base_branch || "");
+  const [branches, setBranches] = useState<string[]>([]);
   const [accept, setAccept] = useState<string[]>(initial.accept);
   const [verify, setVerify] = useState(initial.verify);
   const [constraints, setConstraints] = useState<string[]>(initial.constraints);
@@ -64,6 +65,22 @@ export function TaskForm({
   const [saved, setSaved] = useState(false);
 
   const statusOptions = statuses.length > 0 ? statuses : ["todo"];
+
+  // 選択 repo のブランチ候補を取得(base_branch の datalist 用)。none は空、空欄=デフォルト repo。
+  useEffect(() => {
+    if (repo.toLowerCase() === "none") {
+      setBranches([]);
+      return;
+    }
+    let live = true;
+    api
+      .repoBranches(repo)
+      .then((r) => live && setBranches(r.branches))
+      .catch(() => live && setBranches([]));
+    return () => {
+      live = false;
+    };
+  }, [repo]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -168,8 +185,15 @@ export function TaskForm({
             id="base_branch"
             value={baseBranch}
             onChange={(e) => setBaseBranch(e.target.value)}
+            list="branchlist"
             placeholder="(HEAD)"
+            disabled={repo.toLowerCase() === "none"}
           />
+          <datalist id="branchlist">
+            {branches.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
         </div>
       </div>
 

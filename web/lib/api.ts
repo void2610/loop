@@ -35,6 +35,7 @@ export type TaskInput = Schemas["TaskInput"];
 export type JudgmentInput = Schemas["JudgmentInput"];
 export type GenerateInput = Schemas["GenerateInput"];
 export type ReposResponse = Schemas["ReposResponse"];
+export type BranchesResponse = Schemas["BranchesResponse"];
 export type MonitorSnapshot = Schemas["MonitorSnapshot"];
 export type LiveSnapshot = Schemas["LiveSnapshot"];
 export type PrStatus = Schemas["PrStatus"];
@@ -153,6 +154,9 @@ export const api = {
     request<TaskDetail>("GET", `/tasks/${encodeURIComponent(taskId)}`),
 
   repos: () => request<ReposResponse>("GET", "/repos"),
+
+  repoBranches: (repo: string) =>
+    request<BranchesResponse>("GET", `/repos/branches?repo=${encodeURIComponent(repo)}`),
 
   meta: () => request<MetaResponse>("GET", "/meta"),
 

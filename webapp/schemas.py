@@ -115,6 +115,10 @@ class ReposResponse(BaseModel):
     repos: list[str]
 
 
+class BranchesResponse(BaseModel):
+    branches: list[str]
+
+
 class MonitorSnapshot(BaseModel):
     status: dict[str, Any] | None
     recent: list[RunRow]
@@ -198,6 +202,7 @@ class GenerateInput(BaseModel):
 
     prompt: str = ""
     repo: str = ""
+    base_branch: str = ""
     auto_run: bool = False
 
 

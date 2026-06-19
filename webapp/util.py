@@ -150,6 +150,18 @@ def known_repos() -> list[str]:
     return names + ["none"]
 
 
+def repo_branches(repo: str | None) -> list[str]:
+    """repo 指定(登録名 / 'default' / パス)を解決してブランチ候補を返す。none/未知は空。"""
+    r = (repo or "").strip()
+    if r.lower() == "none":
+        return []
+    cfg = runner.load_config()
+    path = runner.resolve_repo({} if r in ("", "default") else {"repo": r}, cfg)
+    if path is None:
+        return []
+    return runner.list_branches(path)
+
+
 def read_run_status(run_id: str | None = None) -> dict | None:
     """data/.run.lock(=ロック兼ステータス)を読む。現 _read_run_status に run_id フィルタを追加。
 
