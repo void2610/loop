@@ -1,0 +1,5 @@
+{
+  "name": "loop-roles",
+  "version": "0.1.0",
+  "description": "loop engine の各役(Implementer / Verifier 等)を skill として提供。runner が --plugin-dir でロードし、Skill ツール経由で明示呼び出しする(自動発火させない)。"
+}

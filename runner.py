@@ -226,20 +226,21 @@ def render_prompt(task: dict) -> str:
 
 
 def render_implementer_prompt(task: dict, context: str, source: str = "Author の実装プラン", brief: str = "") -> str:
+    # 役の振る舞いは `.claude/plugins/loop-roles/skills/implementer/SKILL.md` に外出し済み。
+    # ここでは「skill を呼べ」と指示し、動的文脈(タスク契約 / プラン / 規範 / 過去ブリーフ)を引数として渡すだけ。
+    # 注意: skill は --plugin-dir でロードされ Skill ツール経由で明示呼び出しされる(自動発火しない)。
     base = render_prompt(task)
-    parts = [base]
+    args_parts = [f"## タスク契約\n{base}"]
     if context and context.strip():
-        parts.append(f"\n# 事前情報({source}。参考にしてよいが鵜呑みにせず、repo の現状を優先する)\n{context}")
-    verify = task.get("verify")
-    parts.append("\n# 進め方\n実装が終わったら、**必ず自分で関連テスト"
-                 + (f"(`{verify}` を含む)" if verify else "")
-                 + "を実行**し、その出力で受け入れ基準を自己確認してから完了してください。")
-    parts.append("\n# 詰まったとき(重要)\n方針の判断がつかない・権限/前提が足りず先に進めない場合は、"
-                 "**推測で押し切らず**、その発言の冒頭に `NEEDS_HUMAN:` を付けて具体的に質問し、そのターンを終えてください"
-                 "(例: `NEEDS_HUMAN: A 案と B 案どちらを採るべきですか?`)。人間の回答が同じセッションに届いたら続行します。")
+        args_parts.append(f"## {source}\n{context}")
     if brief:
-        parts.append(brief)
-    return "\n".join(parts)
+        args_parts.append(brief.lstrip("\n"))  # build_norms_brief / build_repo_brief は冒頭に見出し付き
+    args_text = "\n\n".join(args_parts)
+    return (
+        "`implementer` skill を Skill ツールで呼び出して、以下を引数(args)として渡してください。"
+        "skill 本体に役割定義・進め方・NEEDS_HUMAN の使い方が書いてあります。\n\n"
+        f"{args_text}"
+    )
 
 
 NEEDS_HUMAN_MARKER = "NEEDS_HUMAN:"
@@ -525,8 +526,14 @@ class RoleSession:
             "--max-turns", str(loop.get("max_turns", 40)),
             "--max-budget-usd", str(loop["max_budget_usd"]),
             "--permission-mode", loop.get("permission_mode", "default"),
-            "--allowedTools", *tools,
+            # 役 skill を Skill ツール経由で呼ぶため、Skill を常時付与(task.allowed_tools での絞り込みから外す)
+            "--allowedTools", *tools, "Skill",
         ]
+        # 役の振る舞いを skill として注入する。worktree の cwd は対象 repo の checkout で loop engine と別物
+        # なので、engine 側の `.claude/plugins/loop-roles/` を --plugin-dir で明示ロードする(--bare 下でも skill は解決される)
+        roles_plugin = ROOT / ".claude" / "plugins" / "loop-roles"
+        if roles_plugin.exists():
+            cmd += ["--plugin-dir", str(roles_plugin)]
         if resume_session:
             cmd += ["--resume", resume_session]
         if read_only:
