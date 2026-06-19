@@ -1178,13 +1178,32 @@ def _finalize_run(task: dict, run_id: str, run_dir: Path, md: Path, final: str, 
         auto_commit(DATA, [md, run_dir, task.get("_path")], commit_msg)
 
 
+def _compute_skill_sha(repo: Path | None) -> str:
+    """run の再現性キー。engine 側 `loop-roles` プラグイン(役定義の本体)を主として、
+    target repo の `.claude/skills/`(あればプロジェクト固有の知識)を併記する。
+    どちらも無ければ空。両方あるときは合成 hash(SQL group-by 用の単一キー)。"""
+    parts: list[str] = []
+    p = git(ROOT, "rev-parse", "HEAD:.claude/plugins/loop-roles")
+    if p.returncode == 0 and p.stdout.strip():
+        parts.append(p.stdout.strip())
+    if repo:
+        t = git(repo, "rev-parse", "HEAD:.claude/skills")
+        if t.returncode == 0 and t.stdout.strip():
+            parts.append(t.stdout.strip())
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()
+
+
 def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
                  cfg: dict, started_at: str, verify_code: int | None,
                  test_verdict: str = "none", verifier_verdict: str = "handoff",
                  verifier_obj: dict | None = None, roles: dict | None = None,
                  repo: Path | None = None, pr_url: str | None = None) -> Path:
     repo_sha = git(repo, "rev-parse", "HEAD").stdout.strip() if repo else ""
-    skill_sha = git(repo, "rev-parse", "HEAD:.claude/skills").stdout.strip() if repo else ""
+    skill_sha = _compute_skill_sha(repo)
     roles = roles or {}
 
     cost_total = sum(r["total_cost_usd"] for r in roles.values() if r and r.get("total_cost_usd") is not None) or None
