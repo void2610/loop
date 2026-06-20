@@ -79,8 +79,14 @@ Next の rewrite が同じ PC の `:8765` backend に転送するため、tailsc
 
 - `peers` が空 → 従来通りの単一 PC 表示。
 - 到達できなかった peer は一覧上部に「offline」として表示される(全体は落とさない)。
-- 真実は各 PC の `data/hosts/<host>/` に分散したまま(集約サーバなし・単一障害点なし)。dispatch / live transcript /
-  人間介入は対象 host の URL に直接プロキシする(別フェーズで実装予定)。
+- 真実は各 PC の `data/hosts/<host>/` に分散したまま(集約サーバなし・単一障害点なし)。
+- **peer プロキシ**(`web/app/api/peer/[host]/[...path]/route.ts`): `/api/peer/<host>/<path>` を
+  該当 peer の `<url>/api/<path>` に中継する Next route handler。GET / POST / DELETE 等の JSON 系で
+  dispatch / 介入(`POST /runs/<id>/message`)/ ファイル取得を他 host に向けて飛ばせる。
+- **SSE は peer プロキシを通さない**: Next standalone は Node/Edge いずれでも `text/event-stream` を
+  buffer して最初の event が即時 flush されない(実測)。**SSE はブラウザから対象 peer の backend
+  (`:8765`)を EventSource で直接購読する**設計に倣う(各 PC で `tailscale serve` に `:8765` も足し、
+  backend で CORS を許可する。別フェーズで実装)。
 
 ## タスク(目標契約)`data/tasks/<id>.md`
 
