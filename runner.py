@@ -756,7 +756,7 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
     parts = [f"## 依頼\n{prompt}"]
     if inspect:
         parts.insert(0, f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。")
-        # 憲法(最優先)+ 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は CLAUDE.md > 規範 > 事実。
+        # 憲法(最優先)+ 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は 憲法 > 規範 > 事実。
         brief = build_constitution_brief() + build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
         if brief.strip():
             parts.append(brief.lstrip("\n"))
@@ -982,9 +982,10 @@ def norms_paths(repo: Path, cfg: dict) -> tuple[Path, Path]:
 
 
 def build_constitution_brief() -> str:
-    """人間が書く憲法(data/CLAUDE.md)を最優先で注入する(種類A・自動)。
+    """人間が書く憲法(.claude/plugins/loop-roles/constitution.md)を最優先で注入する(種類A・自動)。
+    役定義ツリー配下なので skill_sha に含まれ、どの憲法版で run したかが再現性ログに残る。
     最優先・エージェント不可侵。存在しなければ何も注入しない(常時オンで分岐を増やさない)。"""
-    path = DATA / "CLAUDE.md"
+    path = ROOT / ".claude" / "plugins" / "loop-roles" / "constitution.md"
     if not path.exists():
         return ""
     text = path.read_text(encoding="utf-8", errors="replace").strip()
@@ -998,7 +999,7 @@ def build_constitution_brief() -> str:
 def build_norms_brief(repo: Path | None, cfg: dict) -> str:
     """承認済み規範(conventions.md)を注入する手続き的記憶(種類A)。
     人間が candidates.md から昇格させたものだけ。候補(candidates.md)は絶対に注入しない。
-    優先順位は CLAUDE.md(憲法) > これ > 過去 run の事実ブリーフ。"""
+    優先順位は 憲法(constitution.md) > これ > 過去 run の事実ブリーフ。"""
     if repo is None:
         return ""
     conv, _ = norms_paths(repo, cfg)
@@ -1008,9 +1009,9 @@ def build_norms_brief(repo: Path | None, cfg: dict) -> str:
     if not text:
         return ""
     return ("\n\n# このリポジトリの設計規範(人間が承認済み)\n"
-            "これは人間が承認した手続き的記憶です。リポジトリの CLAUDE.md(憲法)には劣後しますが、"
+            "これは人間が承認した手続き的記憶です。上の『憲法』には劣後しますが、"
             "下の『過去 run からの事実』よりは優先してください。"
-            "(優先順位: CLAUDE.md > この規範 > 過去 run の事実)\n\n" + text)
+            "(優先順位: 憲法 > この規範 > 過去 run の事実)\n\n" + text)
 
 
 # --- 規範候補(candidates.md)の読み書き。MD が真実、loop.db は派生 ---
@@ -1859,7 +1860,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
 
         # 1) 事前情報: Author 生成の実装プラン(生成時に repo を read-only 調査済み)+ 規範(承認済み)+ 過去 run の事実。
         impl_context = read_plan(task.get("id", ""))
-        # 注入順 = 優先順位: 憲法(CLAUDE.md・最優先)→ 承認済み規範(手続き的記憶)→ 過去 run の事実。
+        # 注入順 = 優先順位: 憲法(constitution.md・最優先)→ 承認済み規範(手続き的記憶)→ 過去 run の事実。
         brief = build_constitution_brief() + build_norms_brief(repo, cfg) + build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))
 
         # 2) Implementer = 永続セッション。**実装中**の判断/権限不足は NEEDS_HUMAN で人間へ(_drive_implementer)。
@@ -2199,7 +2200,7 @@ def promote_candidate(candidate_id: str) -> Path | None:
         conv.parent.mkdir(parents=True, exist_ok=True)
         if not conv.exists() or conv.stat().st_size == 0:
             conv.write_text(f"# {cpath.parent.name} の設計規範(承認済み・run に注入される)\n\n"
-                            "> 人間が candidates.md から昇格させた規範のみ。CLAUDE.md(憲法)に劣後する。\n",
+                            "> 人間が candidates.md から昇格させた規範のみ。憲法(constitution.md)に劣後する。\n",
                             encoding="utf-8")
         with conv.open("a", encoding="utf-8") as f:
             f.write(block)

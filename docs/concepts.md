@@ -60,11 +60,14 @@ verdict の妥当性・信用度・学び、そして実装中の決定や merge
 
 事実記憶(検証コマンド・失敗シグネチャ)は exit code で測れる客観的事実で、優秀なモデルなら数ターンで自己解決する運用上の失敗が多い。それとは別に、**「このリポジトリではどう振る舞うべきか」という規範**(設計・思想・振る舞い)を育てる層を持つ。例:「新機能はインターフェース境界を先に定義してから実装する」「DI 登録は Installer に集約し各クラスで `new` しない」。これらは exit code では検証できないため、**エージェントに確定させず、人間が承認したものだけを注入する**。
 
-規範は repo 単位で 3 層に分離する(`data/repo/<name>/`):
+規範は repo 単位で 2 層に分離する(`data/repo/<name>/`):
 
 - `conventions.md` — **承認済みの規範**。これだけが run に注入される。人間が昇格させたものだけ。
 - `candidates.md` — **昇格待ちの控え室**。注入されない。エージェントが起草し、人間が裁定する。これが種類A/種類Bの分離線。
-- `CLAUDE.md`(`data/` 直下)— 人間が書く憲法。最優先・エージェント不可侵。
+
+さらにその上に、全 repo 共通の**憲法**(`.claude/plugins/loop-roles/constitution.md`、engine 同梱)がある。
+人間が書く最優先・エージェント不可侵の規範で、全 run の brief 冒頭に最優先で注入される(役定義ツリー配下なので
+`skill_sha` に含まれ、どの憲法版で run したかが再現性ログに残る)。
 
 フロー(種類A → 種類B → 注入):
 
@@ -72,7 +75,7 @@ verdict の妥当性・信用度・学び、そして実装中の決定や merge
 2. **昇格(種類B・人間。絶対に自動化しない)**: `uv run runner.py norms` で pending 候補を一覧し、`promote <id>` / `reject <id>` で裁定する。promote は候補の規範文を `conventions.md` へ追記し、**統合・上書き・文言調整・剪定は人間が `conventions.md` を直接編集して**行う(将来 Web から)。CLI/GUI は規範文を自動生成・要約・推奨しない。
 3. **注入(種類A・自動)**: 以降の run 開始時に `conventions.md`(承認済みのみ)を Author/Implementer/Verifier へ事実ブリーフとは**別セクション**で注入する。`candidates.md` は注入しない。
 
-**優先順位は `CLAUDE.md`(憲法) > `conventions.md`(承認済み規範) > 過去 run の事実ブリーフ**。注入文の冒頭に明示する。`conventions.md` が無ければ何も注入されず、摩擦が無ければ起草もされない(常時オンで分岐を増やさない)。`loop.db` の `norm_candidates` は派生インデックスで、`just reindex` が MD から完全再生成する(SQLite は authoritative にしない)。
+**優先順位は 憲法(`constitution.md`) > `conventions.md`(承認済み規範) > 過去 run の事実ブリーフ**。注入文の冒頭に明示する。`conventions.md` が無ければ何も注入されず、摩擦が無ければ起草もされない(常時オンで分岐を増やさない)。`loop.db` の `norm_candidates` は派生インデックスで、`just reindex` が MD から完全再生成する(SQLite は authoritative にしない)。
 
 ## 公開エンジン / 非公開データ
 

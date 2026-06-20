@@ -85,7 +85,7 @@ repo バッジ + run_id + verdict + reviewed + cost + 開始時刻。verdict / r
    フォームの「verdict を覆す」select(or run MD front-matter の `human_verdict: <verdict>`)で選ぶ
    → 保存時に front-matter へ刻まれ、覆しなら規範候補が自動起草される(手動は `runner.py norms draft <run_id>`)。
 6. **規範を育てる(種類B)**: 摩擦 run から起草された規範候補を `runner.py norms` で裁定し、`conventions.md` へ昇格(文言確定は人間)。
-   昇格した規範は以降の run に注入される(優先順位 `CLAUDE.md > conventions.md > 過去 run の事実`)。
+   昇格した規範は以降の run に注入される(優先順位 `憲法(constitution.md) > conventions.md > 過去 run の事実`)。
 7. **分析する**: `just stats`(特に `gaming_suspects` = テスト緑 × Verifier fail)で skill 版ごとの傾向を見る。
 
 ## トラブルシュート
