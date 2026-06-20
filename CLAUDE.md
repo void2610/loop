@@ -58,9 +58,16 @@ data/(別 private repo / engine からは .gitignore / 複数 PC で共有):
 > 到達不能な peer は per-host エラーとして上部に出し全体は落とさない。
 > **peer プロキシ**: `web/app/api/peer/[host]/[...path]/route.ts` が `/api/peer/<host>/<path>` を
 > peer の `<url>/api/<path>` に中継(GET/POST/DELETE 等の JSON 系)。dispatch・介入・ファイル取得を
-> 他 host に向けて飛ばせる。**SSE はこの handler を通さない**(Next standalone は Node/Edge いずれでも
-> response stream を buffer して event-stream の最初の event が即時 flush されない実測あり)。SSE は
-> ブラウザから対象 peer の backend(`:8765`)を EventSource で直接購読する(別フェーズで実装)。
+> 他 host に向けて飛ばせる。
+> **SSE は peer プロキシを通さない**(Next standalone は Node/Edge いずれでも response stream を buffer
+> して event-stream の最初の event が即時 flush されない実測あり)。SSE はブラウザから対象 peer の
+> backend(`:8765`)を EventSource で直接購読する(実装済み):
+> - `just app` が `tailscale serve --bg --http=8765 8765` も出すので Tailnet 内なら `:8765` にも届く
+>   (auth は tailscaled 経由で `client.host=127.0.0.1` として loopback 扱い)。
+> - backend の CORS `allow_origins` に **`[fleet].peers` の URL が自動追加**(webapp/main.py が
+>   `runner.load_config()` から読む)。peer の `:3000` フロントを Origin として `:8765` を叩ける。
+> - frontend は `lib/sse.ts` の `subscribe*(handlers, token, peerBase)` の第3引数で peer base URL を
+>   指定(`:3000` を `:8765` に置換して EventSource を開く)。
 
 > **実行機構(現行)**: 全役は **`RoleSession`(`claude -p --input-format/--output-format stream-json` の永続双方向セッション)**で動く。one-shot(`-p <prompt>`)と `--resume` 再 spawn は撤去。追加指示(revise / 人間介入)はすべて `send()` で**同一セッションへ user メッセージ注入**に一本化。`run_role` はその単発ラッパ(Verifier 等)。
 > **人間介入(awaiting)= 責務分離**: ①**実装中**の方針疑問/権限不足は Implementer が `NEEDS_HUMAN:` 合図でターンを区切る → `_drive_implementer` が **Verifier より前に** `await_human` で人間へ(主経路)。②**実装後**の結果/テスト欠陥は Verifier の責務で `revise` 自動修正(人間不要)。③ Verifier の handoff / revise 上限超過は**最後の安全網**としてだけ人間へ。いずれも `runs/<id>/inbox.jsonl` 待ち(`intervention_timeout_seconds`、超過で handoff)。Web の `/runs/<id>/live` が `intervention` を出し `POST /api/runs/<id>/message` で同一セッションへ注入。**GUI は事実表示のみ・選択肢/判断を生成しない**。

@@ -85,8 +85,13 @@ Next の rewrite が同じ PC の `:8765` backend に転送するため、tailsc
   dispatch / 介入(`POST /runs/<id>/message`)/ ファイル取得を他 host に向けて飛ばせる。
 - **SSE は peer プロキシを通さない**: Next standalone は Node/Edge いずれでも `text/event-stream` を
   buffer して最初の event が即時 flush されない(実測)。**SSE はブラウザから対象 peer の backend
-  (`:8765`)を EventSource で直接購読する**設計に倣う(各 PC で `tailscale serve` に `:8765` も足し、
-  backend で CORS を許可する。別フェーズで実装)。
+  (`:8765`)を EventSource で直接購読する**(実装済み):
+  - `just app` が `tailscale serve --bg --http=8765 8765` も出すので、Tailnet 経由で `:8765` にも届く。
+    auth は tailscaled 経由のため `client.host = 127.0.0.1` として loopback 扱い(`proxy_headers=False`)。
+  - backend の CORS `allow_origins` に **`[fleet].peers` の URL が自動追加**される(`webapp/main.py` で
+    `runner.load_config()` から読込)。peer の Next フロント(`:3000`)を Origin として `:8765` を叩ける。
+  - frontend は `lib/sse.ts` の `subscribeMonitor` / `subscribeRun` に `peerBase` 引数を渡すと、
+    `peer.url` の `:3000` を `:8765` に置換して EventSource を開く。
 
 ## タスク(目標契約)`data/tasks/<id>.md`
 

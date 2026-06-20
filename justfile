@@ -54,17 +54,28 @@ app: web-build
     fi
     # tailscaled を前段に(ALF 回避)。--bg は非同期 + 冪等で、失敗しても script は止まらないため
     # 直後に `tailscale serve status` で設定反映を検証する(これが無いと「画面は出るが API が 403」になる)
+    # :3000 は Next フロント、:8765 は backend(他 PC のブラウザから EventSource で SSE を直接購読)。
     tailscale serve --bg --http=3000 3000
+    tailscale serve --bg --http=8765 8765
     if ! tailscale serve status 2>/dev/null | grep -q "proxy http://127.0.0.1:3000"; then
-        echo "✗ tailscale serve の設定が反映されていません。`tailscale serve status` を確認してください" >&2
+        echo "✗ tailscale serve(:3000)の設定が反映されていません。`tailscale serve status` を確認してください" >&2
+        exit 1
+    fi
+    if ! tailscale serve status 2>/dev/null | grep -q "proxy http://127.0.0.1:8765"; then
+        echo "✗ tailscale serve(:8765)の設定が反映されていません。`tailscale serve status` を確認してください" >&2
         exit 1
     fi
     FQDN=$(tailscale status --json | python3 -c "import sys,json;print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
-    echo "起動: http://$FQDN:3000 (Tailnet 内のデバイスから)  /  backend 127.0.0.1:8765  (Ctrl-C で停止)"
+    echo "起動: http://$FQDN:3000 (Tailnet 内のデバイスから)  /  backend 127.0.0.1:8765 (Tailnet: $FQDN:8765)  (Ctrl-C で停止)"
     # Ctrl-C / 異常終了で serve も off にする(永続設定の中途半端を残さない)。
     # 注意: kill 0 は同一プロセスグループ = 自分にも SIGTERM が届く。trap を解除してから kill しないと
     # 再帰呼び出しの無限ループに陥り、`tailscale serve off` を連打して新規 serve 設定を即削除する亡霊と化す(実地で踏んだ)
-    cleanup() { trap - INT TERM EXIT; tailscale serve --http=3000 off >/dev/null 2>&1 || true; kill 0 2>/dev/null || true; }
+    cleanup() {
+        trap - INT TERM EXIT
+        tailscale serve --http=3000 off >/dev/null 2>&1 || true
+        tailscale serve --http=8765 off >/dev/null 2>&1 || true
+        kill 0 2>/dev/null || true
+    }
     trap cleanup INT TERM EXIT
     uv run webapp/main.py &
     BACKEND_PID=$!

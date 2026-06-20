@@ -38,8 +38,13 @@ export type RunStreamHandlers = {
 };
 
 /** token は WS6 で実体化する短命 signed query token(P0 は undefined)。 */
-function sseUrl(path: string, token?: string): string {
-  const u = new URL(`${SSE_BASE}/api${path}`, typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1");
+function sseUrl(path: string, token?: string, peerBase?: string): string {
+  // peerBase が指定されたとき(Fleet で他 host を購読)は、その peer の backend URL を直接叩く。
+  // 注: peer の url は :3000 の Next フロントを指す。SSE は backend(:8765)を叩く必要があるため、
+  // :3000 → :8765 に置き換える(各 PC で tailscale serve --bg --http=8765 8765 が出ている前提)。
+  const base = peerBase ? peerBase.replace(/:3000$/, ":8765") : SSE_BASE;
+  const fallback = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1";
+  const u = new URL(`${base}/api${path}`, fallback);
   if (token) u.searchParams.set("token", token);
   return u.toString();
 }
@@ -55,9 +60,13 @@ function on<T>(es: EventSource, name: string, cb?: (d: T) => void) {
   });
 }
 
-/** monitor 全体の SSE を購読。戻り値の close() で解放する。 */
-export function subscribeMonitor(handlers: MonitorHandlers, token?: string): () => void {
-  const es = new EventSource(sseUrl("/stream/monitor", token));
+/** monitor 全体の SSE を購読。peerBase 指定で Fleet の他 host を購読。戻り値の close() で解放。 */
+export function subscribeMonitor(
+  handlers: MonitorHandlers,
+  token?: string,
+  peerBase?: string,
+): () => void {
+  const es = new EventSource(sseUrl("/stream/monitor", token, peerBase));
   on(es, "status", handlers.status);
   on(es, "run_done", handlers.run_done);
   on(es, "heartbeat", handlers.heartbeat);
@@ -65,13 +74,14 @@ export function subscribeMonitor(handlers: MonitorHandlers, token?: string): () 
   return () => es.close();
 }
 
-/** 進行中 run のライブ transcript SSE を購読。戻り値の close() で解放する。 */
+/** 進行中 run のライブ transcript SSE を購読。peerBase 指定で Fleet の他 host を購読。 */
 export function subscribeRun(
   runId: string,
   handlers: RunStreamHandlers,
-  token?: string
+  token?: string,
+  peerBase?: string,
 ): () => void {
-  const es = new EventSource(sseUrl(`/runs/${encodeURIComponent(runId)}/stream`, token));
+  const es = new EventSource(sseUrl(`/runs/${encodeURIComponent(runId)}/stream`, token, peerBase));
   on(es, "event", handlers.event);
   on(es, "phase", handlers.phase);
   on(es, "end", handlers.end);

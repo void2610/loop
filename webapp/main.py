@@ -22,6 +22,8 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
+import runner  # noqa: E402
+
 from webapp.api import api_router  # noqa: E402
 from webapp.auth import AuthMiddleware  # noqa: E402
 
@@ -29,13 +31,22 @@ app = FastAPI(title="loop")
 app.add_middleware(AuthMiddleware)  # P0: 127.0.0.1 のみ通す no-op(実体は WS6)
 
 # SSE はブラウザ→FastAPI 直(クロスオリジン)。EventSource 接続のため CORS を許可する。
-# JSON は Next の同一オリジン rewrite 経由なので CORS 不要。許可元は dev 既定 + env で上書き。
+# JSON は Next の同一オリジン rewrite 経由なので CORS 不要。許可元は dev 既定 + env + Fleet の peers。
 _origins_env = os.environ.get("LOOP_WEB_ORIGINS")
-_allowed_origins = (
+_base_origins = (
     [o.strip() for o in _origins_env.split(",") if o.strip()]
     if _origins_env
     else ["http://localhost:3000", "http://127.0.0.1:3000"]
 )
+# Fleet 設定が有れば peers の URL も CORS に追加(他 PC のブラウザから自 backend を EventSource で叩く)。
+_fleet_peers = (runner.load_config().get("fleet", {}) or {}).get("peers") or []
+_fleet_origins = [
+    str(p["url"]).rstrip("/") for p in _fleet_peers
+    if isinstance(p, dict) and isinstance(p.get("url"), str) and p["url"].strip()
+]
+# 重複除去(順序保持)
+_seen: set[str] = set()
+_allowed_origins = [o for o in (*_base_origins, *_fleet_origins) if not (o in _seen or _seen.add(o))]
 app.add_middleware(  # CORS を最外層に(SSE のプリフライト/レスポンスヘッダ付与)
     CORSMiddleware,
     allow_origins=_allowed_origins,
