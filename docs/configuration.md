@@ -46,6 +46,12 @@ myproject = "/Users/me/Documents/GitHub/myproject"
 path = "myproject"
 [data]                               # 任意。複数 PC で同じ data repo を共有するときは host 別に切る
 dir = "data/hosts/<this-host>"       # 各 PC は自分のディレクトリだけ書くので衝突なく git で同期できる
+[fleet]                              # 任意。1 つの Web GUI から全 PC を扱う Fleet 機能
+self = "<this-host>"
+peers = [                            # 自分自身も含める。peers が空なら従来通り単一 PC 表示
+  { name = "<this-host>",  url = "http://<this-host>.<tailnet>.ts.net:3000" },
+  { name = "<other-mac>",  url = "http://<other-mac>.<tailnet>.ts.net:3000" },
+]
 ```
 
 > 起動時に `verifier_model == implementer_model` だと警告(記事の Sub-agents の意図が無効化されるため)。
@@ -63,6 +69,18 @@ data/                       # 1 つの private git repo を全 PC で共有
 
 各 PC は自分の `hosts/<this-host>/` だけを書き換えるので、`git pull --rebase --autostash` で常時同期しても
 衝突しない。他 PC の run は手元の同じ clone でそのまま読める(grep / backup 横断が効く)。
+
+### Fleet(複数 PC を 1 つの GUI から扱う)
+
+`[fleet]` を設定すると、各 PC の Web GUI が **`/api/fleet/peers` を読み、全 peer の `/api/runs` を並列 fetch して
+host バッジ付きの merge view を出す**(`/runs` 一覧)。peer は **その PC の Next フロント URL**(`:3000`)を指す:
+Next の rewrite が同じ PC の `:8765` backend に転送するため、tailscale serve は `:3000` だけを公開すれば良い
+(backend を直接 Tailnet に出さない)。server-side fetch なので CORS は不要。
+
+- `peers` が空 → 従来通りの単一 PC 表示。
+- 到達できなかった peer は一覧上部に「offline」として表示される(全体は落とさない)。
+- 真実は各 PC の `data/hosts/<host>/` に分散したまま(集約サーバなし・単一障害点なし)。dispatch / live transcript /
+  人間介入は対象 host の URL に直接プロキシする(別フェーズで実装予定)。
 
 ## タスク(目標契約)`data/tasks/<id>.md`
 

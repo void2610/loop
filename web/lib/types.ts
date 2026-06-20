@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Peers */
+        get: operations["fleet_peers_api_fleet_peers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meta": {
         parameters: {
             query?: never;
@@ -640,6 +657,34 @@ export interface components {
         EvidenceMeta: {
             /** Files */
             files: components["schemas"]["EvidenceFileMeta"][];
+        };
+        /**
+         * FleetInfo
+         * @description GET /api/fleet/peers のレスポンス。peers が空なら Fleet 機能 off(従来通り単一 PC 表示)。
+         */
+        FleetInfo: {
+            /** Self Name */
+            self_name?: string | null;
+            /**
+             * Peers
+             * @default []
+             */
+            peers: components["schemas"]["FleetPeer"][];
+        };
+        /**
+         * FleetPeer
+         * @description Fleet を構成する 1 台分の情報。url は Tailnet 経由の Next フロント URL(/api/* を中継)。
+         */
+        FleetPeer: {
+            /** Name */
+            name: string;
+            /** Url */
+            url: string;
+            /**
+             * Is Self
+             * @default false
+             */
+            is_self: boolean;
         };
         /** GamingSuspectRow */
         GamingSuspectRow: {
@@ -1302,6 +1347,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunStartResult"];
+                };
+            };
+        };
+    };
+    fleet_peers_api_fleet_peers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetInfo"];
                 };
             };
         };

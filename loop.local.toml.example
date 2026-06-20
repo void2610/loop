@@ -24,3 +24,13 @@
 # 各 PC は自分のディレクトリだけ書くので git pull --rebase --autostash で衝突せず同期できる。
 # [data]
 # dir = "data/hosts/<this-host>"
+
+# (任意・複数 PC 運用)Fleet: 1 つの Web GUI から全 PC を扱う。peers が空なら単一 PC 表示のまま。
+# url は各 PC の Next フロント(Tailnet 経由)を指す。各 PC は自分自身も peers に含める。
+# Fleet 画面は peers の /api/* を並列 fetch し host バッジ付きで merge view を出す。
+# [fleet]
+# self = "<this-host>"
+# peers = [
+#   { name = "<this-host>",  url = "http://<this-host>.<tailnet>.ts.net:3000" },
+#   { name = "<other-mac>",  url = "http://<other-mac>.<tailnet>.ts.net:3000" },
+# ]

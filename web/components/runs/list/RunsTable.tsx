@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 
 import type { RunRow } from "@/lib/api";
+import type { RunRowWithHost } from "@/lib/fleet";
 import {
   Table,
   TableBody,
@@ -37,10 +38,16 @@ export function RunsTable({
   runs,
   active = [],
   onChanged,
+  showHost = false,
+  selfHost,
 }: {
-  runs: RunRow[];
+  runs: RunRowWithHost[] | RunRow[];
   active?: RunStatus[];
   onChanged?: () => void;
+  // Fleet が有効(peers >= 2、または peers=1 でも self 以外を含む)なときに host 列を出す
+  showHost?: boolean;
+  // active(SSE 由来)行に充てる host 名(SSE は自 host のみ)
+  selfHost?: string;
 }) {
   const router = useRouter();
 
@@ -58,6 +65,7 @@ export function RunsTable({
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
+            {showHost ? <TableHead className="th-label">host</TableHead> : null}
             <TableHead className="th-label">repo</TableHead>
             <TableHead className="th-label">run</TableHead>
             <TableHead className="th-label">verdict</TableHead>
@@ -81,6 +89,9 @@ export function RunsTable({
               }
               onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}/live`)}
             >
+              {showHost ? (
+                <TableCell className="font-mono text-xs text-muted-foreground">{selfHost ?? ""}</TableCell>
+              ) : null}
               <TableCell>
                 <RepoBadge repo={r.repo} mono />
               </TableCell>
@@ -116,6 +127,11 @@ export function RunsTable({
               className="cursor-pointer transition-colors hover:bg-accent/40"
               onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}`)}
             >
+              {showHost ? (
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  {(r as RunRowWithHost).host ?? ""}
+                </TableCell>
+              ) : null}
               <TableCell>
                 <RepoBadge repo={r.repo} mono />
               </TableCell>

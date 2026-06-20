@@ -52,7 +52,10 @@ data/(別 private repo / engine からは .gitignore / 複数 PC で共有):
 > **複数 PC 運用**: data は 1 つの private repo を全 PC で共有し、各 PC は自分の `hosts/<this-host>/` だけを書き換える。
 > `loop.local.toml [data] dir = "data/hosts/<this-host>"` で指す(`_data_dir()` は `load_config()` 経由で local をマージ)。
 > 衝突は本質的に起きないので `git pull --rebase --autostash` で常時同期できる。
-> Fleet 画面(各 PC の `/api/*` を Tailnet で並列 fetch して統合 view)は別途実装予定。
+> **Fleet(`loop.local.toml [fleet] peers`)**: 各 peer は自分の Next フロント(`:3000`)を指す。`/runs` は全 peer の `/api/runs`
+> を **server-side で並列 fetch して host バッジ付き merge view**。peer URL は `:3000` を指すので Next の rewrite が
+> 同じ PC の `:8765` backend に転送し、tailscale serve は `:3000` だけで届く(CORS 不要・backend を Tailnet 直公開しない)。
+> 到達不能な peer は per-host エラーとして上部に出し全体は落とさない。dispatch / live / 介入の peer プロキシは別フェーズ。
 
 > **実行機構(現行)**: 全役は **`RoleSession`(`claude -p --input-format/--output-format stream-json` の永続双方向セッション)**で動く。one-shot(`-p <prompt>`)と `--resume` 再 spawn は撤去。追加指示(revise / 人間介入)はすべて `send()` で**同一セッションへ user メッセージ注入**に一本化。`run_role` はその単発ラッパ(Verifier 等)。
 > **人間介入(awaiting)= 責務分離**: ①**実装中**の方針疑問/権限不足は Implementer が `NEEDS_HUMAN:` 合図でターンを区切る → `_drive_implementer` が **Verifier より前に** `await_human` で人間へ(主経路)。②**実装後**の結果/テスト欠陥は Verifier の責務で `revise` 自動修正(人間不要)。③ Verifier の handoff / revise 上限超過は**最後の安全網**としてだけ人間へ。いずれも `runs/<id>/inbox.jsonl` 待ち(`intervention_timeout_seconds`、超過で handoff)。Web の `/runs/<id>/live` が `intervention` を出し `POST /api/runs/<id>/message` で同一セッションへ注入。**GUI は事実表示のみ・選択肢/判断を生成しない**。

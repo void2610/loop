@@ -357,3 +357,20 @@ class CostTimelineResponse(_StatsEnvelope):
 _declared = set(RunRow.model_fields)
 _missing = _declared - set(loopdb.COLUMNS) - {"run_id"}
 assert not _missing, f"RunRow に loopdb.COLUMNS 外のフィールド: {_missing}"
+
+
+# --- Fleet(複数 PC で1つの GUI から全 PC を扱う面)---
+
+class FleetPeer(BaseModel):
+    """Fleet を構成する 1 台分の情報。url は Tailnet 経由の Next フロント URL(/api/* を中継)。"""
+
+    name: str             # 表示名・識別子(loop.local.toml [data] dir の host 名と揃える)
+    url: str              # 例: "http://shuyamacbook-pro.taila217e5.ts.net:3000"
+    is_self: bool = False  # この応答を返した backend 自身であるか
+
+
+class FleetInfo(BaseModel):
+    """GET /api/fleet/peers のレスポンス。peers が空なら Fleet 機能 off(従来通り単一 PC 表示)。"""
+
+    self_name: str | None = None     # 自 host 名(設定が無ければ None)
+    peers: list[FleetPeer] = []
