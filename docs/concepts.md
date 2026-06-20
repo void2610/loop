@@ -51,8 +51,8 @@ verdict の妥当性・信用度・学び、そして実装中の決定や merge
 |---|---|
 | **Automations** | runner が次タスク自動選択 + 自動コミット。手動 `just run` + launchd WatchPaths(data/tasks 変更) |
 | **Worktrees** | `git worktree` を run ごとに(loop repo 内 `.loop-worktrees/` に固定配置) |
-| **Skills** | `.claude/plugins/loop-roles/`(role 別 SKILL.md + shared 指針 + templates)。runner は engine 側 plugin tree SHA を `skill_sha` に刻み、target repo に `.claude/skills/` があれば併合 hash |
-| **Sub-agents** | Author(プラン)→ Implementer → Verifier の分離。Verifier は別モデル必須。revise は Implementer を `--resume` で差し戻し |
+| **Skills** | `.claude/plugins/loop-roles/`(role 別 SKILL.md + shared 指針 + templates)。runner は engine 側 plugin tree SHA を `skill_sha` に刻み、target repo に `.claude/skills/` があれば両方の合成ハッシュ(`sha1(engine_sha\|repo_sha)`) |
+| **Sub-agents** | Author(目標契約 + 実装プラン生成)→ Implementer → Verifier の分離。Author は repo を read-only 調査し goal/accept/verify/plan を起草。Verifier は別モデル必須。revise は Implementer を**同一セッションへ `send`** で差し戻し |
 | **Connectors** | ローカル FS / git / shell。証拠はローカルテスト実行から。promote 時は GitHub(PR / CI / Copilot レビュー) |
 | **Memory** | `runs/*.md` + 証拠 + `review-notes.md` + SKILL.md(=契約)。SQLite/DuckDB はその派生。記憶は2系統: ①**事実記憶**(同一 repo で通った検証コマンド・直近 verdict・失敗事実)を Author/Implementer/Verifier に自動注入(種類A)し、回すほど repo に習熟する。②**手続き的記憶=規範**(`conventions.md`。下記参照)。どちらも**人間の判断(学び/review-notes)はエージェントに渡さない**=メタループ(人間が skill/ゲート/契約を改善する燃料) |
 

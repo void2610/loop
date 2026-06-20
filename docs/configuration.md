@@ -12,7 +12,6 @@ verifier_attempts = 3                # Verifier が handoff のとき read-only 
 implementer_revise_rounds = 2        # Verifier が revise のとき同一セッションへ差し戻す往復上限
 intervention_timeout_seconds = 1800  # handoff/上限超過で awaiting にし Web の続行指示を待つ秒数(超過で handoff)
 max_attempts = 2                     # 実装が timeout/error のとき run 全体を再試行する上限
-default_allowed_tools = ["Read","Edit","Write","Grep","Glob","Bash"]  # タスク未指定時のフォールバック
 permission_mode = "default"
 max_concurrency = 1                  # 同時 run 本数(1=従来の直列)
 
@@ -25,10 +24,10 @@ copilot_timeout_seconds = 600        # Copilot レビュー投稿待ちタイム
 repo_history_runs = 8                # 同一 repo の過去 run の事実を各役へ渡す件数(0=無効。人間の判断は渡さない)
 
 [agents]                             # Sub-agents + 生成。Verifier は implementer と別モデル必須
-implementer_model = "claude-sonnet-4-6"   # 主力。差し戻し時は --resume で継続
+implementer_model = "claude-sonnet-4-6"   # 主力。差し戻し時は同一の永続セッションへ send で継続
 verifier_model    = "claude-opus-4-8"     # 別モデル必須
 author_model      = "claude-sonnet-4-6"   # プロンプト→目標契約 + 実装プラン + 規範候補の起草(旧 Explorer を統合)
-implementer_tools = ["Read","Edit","Write","Bash","Grep","Glob"]
+implementer_tools = ["Read","Edit","Write","Bash","Grep","Glob"]  # task.allowed_tools 未指定時のフォールバックも兼ねる
 verifier_tools    = ["Read","Grep","Glob"]
 
 [data]
@@ -65,8 +64,10 @@ accept:                  # 受け入れ基準(人間可読。定量的に)
 verify: <決定論コマンド。worktree で実行し exit 0 = test pass。空なら Verifier 判定に委ねる>
 constraints:             # 禁止領域・制約(任意)
   - ...
-allowed_tools: Read,Edit,Write,Bash   # headless に事前認可(カンマ区切り or リスト)
+allowed_tools: Read,Edit,Write,Bash   # headless に事前認可(カンマ区切り or リスト。省略時は [agents].implementer_tools)
 max_attempts: 1          # (任意) run 全体の再試行上限。非冪等タスク(外部FS書き換え等)は 1
+base_branch: <起点ブランチ>  # (任意) loop/<id> を切る起点。空=現在の HEAD(ローカル / origin いずれか実在を要求)
+no_pr: false             # (任意) true で promote(PR 提出)を抑止しローカル検証で留める
 status: todo             # todo | pass | fail | handoff | timeout | stopped | awaiting-merge(runner が更新)
 ---
 
@@ -95,7 +96,7 @@ Web GUI(`/tasks`)から一覧・項目別フォーム編集・新規作成・プ
 front-matter をそのまま列にした派生ビュー。authoritative ではない。`just reindex` で `runs/*.md` から
 完全再生成できる。列: `run_id, task, verdict, reviewed, model, cost_usd, turns, duration_ms, session_id,
 repo_sha, skill_sha, goal_contract_sha, started_at, md_path, test_verdict, verifier_verdict,
-verifier_confidence, repo`。
+verifier_confidence, repo, archived, human_verdict`。
 
 ## DuckDB 分析(`stats.py` + `queries/*.sql`)
 
