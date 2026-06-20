@@ -48,10 +48,10 @@ def load_config() -> dict:
 
 
 def _data_dir() -> Path:
-    """契約データ(TODO/runs/review-notes/loop.db)の置き場。別の private git repo にする。"""
+    """契約データ(tasks/runs/review-notes/loop.db)の置き場。別の private git repo にする。
+    loop.local.toml [data] dir で host 別パス(例: "data/hosts/<host>")に上書きできる。"""
     try:
-        with CONFIG.open("rb") as f:
-            d = tomllib.load(f).get("data", {}).get("dir", "data")
+        d = load_config().get("data", {}).get("dir", "data")
     except FileNotFoundError:
         d = "data"
     return (ROOT / d).resolve()

@@ -18,3 +18,9 @@
 # (任意)タスクが repo を指定しなかったときのデフォルト対象。未設定なら "."(loop 自身)。
 # [repo]
 # path = "myproject"
+
+# (任意・複数 PC 運用)契約データを host 別ディレクトリに分けて衝突なく同期する。
+# 既定は "data"(repo root)。複数 PC で同じ data repo を共有するときは host 別パスを指す。
+# 各 PC は自分のディレクトリだけ書くので git pull --rebase --autostash で衝突せず同期できる。
+# [data]
+# dir = "data/hosts/<this-host>"

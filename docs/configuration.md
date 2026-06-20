@@ -31,10 +31,10 @@ implementer_tools = ["Read","Edit","Write","Bash","Grep","Glob"]  # task.allowed
 verifier_tools    = ["Read","Grep","Glob"]
 
 [data]
-dir = "data"                         # 契約データの置き場(別 private git repo)
+dir = "data"                         # 契約データの置き場(別 private git repo)。複数 PC では host 別に切る(下記)
 ```
 
-> **リポジトリ構成([repo] デフォルト対象 / [repos] レジストリ)は loop.toml に書かない。**
+> **リポジトリ構成([repo] デフォルト対象 / [repos] レジストリ / [data] dir)は loop.toml に書かない。**
 > マシン固有なので gitignore された `loop.local.toml` に置き、`load_config` がマージする
 > (`loop.local.toml.example` 参照)。未指定時の対象 repo は `"."`(loop 自身)にフォールバック。
 
@@ -44,9 +44,25 @@ dir = "data"                         # 契約データの置き場(別 private g
 myproject = "/Users/me/Documents/GitHub/myproject"
 [repo]                               # 任意。既定対象。未設定なら "."
 path = "myproject"
+[data]                               # 任意。複数 PC で同じ data repo を共有するときは host 別に切る
+dir = "data/hosts/<this-host>"       # 各 PC は自分のディレクトリだけ書くので衝突なく git で同期できる
 ```
 
 > 起動時に `verifier_model == implementer_model` だと警告(記事の Sub-agents の意図が無効化されるため)。
+
+### 複数 PC 運用での `data/` 構造
+
+```
+data/                       # 1 つの private git repo を全 PC で共有
+  hosts/
+    shuyamacbook-pro/       # 各 PC 専用ディレクトリ(loop.local.toml [data] dir で指す)
+      tasks/  runs/  plans/  review-notes.md  loop.db
+    other-mac/
+      tasks/  runs/  plans/  review-notes.md  loop.db
+```
+
+各 PC は自分の `hosts/<this-host>/` だけを書き換えるので、`git pull --rebase --autostash` で常時同期しても
+衝突しない。他 PC の run は手元の同じ clone でそのまま読める(grep / backup 横断が効く)。
 
 ## タスク(目標契約)`data/tasks/<id>.md`
 
