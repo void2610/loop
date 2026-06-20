@@ -756,8 +756,8 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
     parts = [f"## 依頼\n{prompt}"]
     if inspect:
         parts.insert(0, f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。")
-        # 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は CLAUDE.md > 規範 > 事実。
-        brief = build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
+        # 憲法(最優先)+ 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は CLAUDE.md > 規範 > 事実。
+        brief = build_constitution_brief() + build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
         if brief.strip():
             parts.append(brief.lstrip("\n"))
     wrapped = "/loop-roles:task-author " + "\n\n".join(parts)
@@ -979,6 +979,20 @@ def norms_paths(repo: Path, cfg: dict) -> tuple[Path, Path]:
     """(conventions.md, candidates.md) のパスを返す。"""
     d = NORMS_ROOT / repo_norm_name(repo, cfg)
     return d / "conventions.md", d / "candidates.md"
+
+
+def build_constitution_brief() -> str:
+    """人間が書く憲法(data/CLAUDE.md)を最優先で注入する(種類A・自動)。
+    最優先・エージェント不可侵。存在しなければ何も注入しない(常時オンで分岐を増やさない)。"""
+    path = DATA / "CLAUDE.md"
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if not text:
+        return ""
+    return ("\n\n# 憲法(最優先・不可侵)\n"
+            "これは人間が定めた最上位の規範です。以下の設計規範・事実ブリーフや個別タスク指示と矛盾する場合も、"
+            "この憲法を最優先で守ってください。\n\n" + text)
 
 
 def build_norms_brief(repo: Path | None, cfg: dict) -> str:
@@ -1845,8 +1859,8 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
 
         # 1) 事前情報: Author 生成の実装プラン(生成時に repo を read-only 調査済み)+ 規範(承認済み)+ 過去 run の事実。
         impl_context = read_plan(task.get("id", ""))
-        # 注入順 = 優先順位: 承認済み規範(手続き的記憶)→ 過去 run の事実(両方とも CLAUDE.md/憲法 には劣後)。
-        brief = build_norms_brief(repo, cfg) + build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))
+        # 注入順 = 優先順位: 憲法(CLAUDE.md・最優先)→ 承認済み規範(手続き的記憶)→ 過去 run の事実。
+        brief = build_constitution_brief() + build_norms_brief(repo, cfg) + build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))
 
         # 2) Implementer = 永続セッション。**実装中**の判断/権限不足は NEEDS_HUMAN で人間へ(_drive_implementer)。
         #    **実装後**の欠陥は Verifier の責務(revise で自動修正)。handoff→人間は最後の安全網。
