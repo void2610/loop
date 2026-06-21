@@ -2228,28 +2228,29 @@ def cmd_continue(run_id: str, instructions: str) -> int:
     cont_count = int(fm.get("continue_count") or 0) + 1
     now_iso = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
+    # 続行の前提を全部先に検証(失敗時に run.md / transcript を汚さない順序が大事)。
+    # verdict=running の書き換え・continuation marker の追記・lock 取得は、この検証を通過してから。
+    repo = resolve_repo(task, cfg)
+    if not is_git_repo(repo):
+        print(f"  · repo 不正: {repo}", file=sys.stderr)
+        return 1
+    base_ref = f"loop/{run_id}"
+    if git(repo, "rev-parse", "--verify", base_ref).returncode != 0:
+        print(f"  · branch {base_ref} が repo に無い(promote 後の削除など。新規タスクで作り直してください)",
+              file=sys.stderr)
+        return 2  # caller(API)向け終了コード: 続行不能。run.md には触らない。
+
+    print(f"▶ continue: {run_id}(続行 #{cont_count})")
+
     # 中断境界 + 追加指示が transcript で見える(TranscriptEventView が type を理解する)。
     marker = {"type": "continuation", "continue_count": cont_count,
               "at": now_iso, "instructions": instructions}
     with (run_dir / "implementer.stream.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(marker, ensure_ascii=False) + "\n")
 
-    print(f"▶ continue: {run_id}(続行 #{cont_count})")
-
     # 前 run の verdict(awaiting-merge 等)が残っていると active_runs が「最終」と判定して
-    # この続行 run を監視 UI から消す。続行が確定するまで verdict を一時的に外す。
+    # この続行 run を監視 UI から消す。続行が確定するまで verdict を一時的に running にする。
     _set_fm_key(md_path, "verdict", "running")
-
-    repo = resolve_repo(task, cfg)
-    if not is_git_repo(repo):
-        print(f"  · repo 不正: {repo}", file=sys.stderr)
-        return 1
-
-    # 続行は前 run の成果ブランチ(loop/<run_id>)から worktree を切り直す。
-    base_ref = f"loop/{run_id}"
-    if git(repo, "rev-parse", "--verify", base_ref).returncode != 0:
-        print(f"  · branch {base_ref} が repo に無い(前 run の成果なし)", file=sys.stderr)
-        return 1
 
     serial = repo_mode(repo, cfg) == "serial"
     lock = _serial_lock(repo) if serial else None

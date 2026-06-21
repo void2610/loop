@@ -117,6 +117,7 @@ def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
     """完了 run に人間の追加指示を投じて Implementer を resume + Verifier 監査まで走らせる。
     同じ run_id を保ち、stream に continuation marker を追記する。background 実行(SSE で進行を見る)。"""
     import subprocess as _sp
+    import yaml as _yaml
     text = (inp.text or "").strip()
     if not text:
         raise HTTPException(400, err("bad_input", "text は必須です"))
@@ -129,6 +130,29 @@ def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
     # .run.lock 進行中は弾く(continue は完了 run 用)
     if (runner.DATA / ".run.lock").exists():
         raise HTTPException(409, err("busy", "他の run が進行中です"))
+    # 続行の前提を背景プロセス起動前に検証(202 で silent fail させない)。
+    # 1) repo 解決 & git repo か / 2) loop/<run_id> ブランチが残っているか(promote 後に削除されると続行不能)。
+    try:
+        lines, s, e = runner._split_front_matter(md.read_text(encoding="utf-8"))
+        fm = (_yaml.safe_load("\n".join(lines[s:e])) or {}) if e else {}
+    except (OSError, _yaml.YAMLError):
+        fm = {}
+    task_id = (fm or {}).get("task")
+    if not task_id:
+        raise HTTPException(409, err("bad_run_md", "run.md に task が無く続行できません"))
+    cfg = runner.load_config()
+    task_res = runner.read_task(str(task_id))
+    if task_res is None:
+        raise HTTPException(409, err("task_missing", f"task が見つかりません: {task_id}"))
+    repo = runner.resolve_repo({"repo": (task_res[0] or {}).get("repo")}, cfg)
+    if not runner.is_git_repo(repo):
+        raise HTTPException(409, err("repo_invalid", f"repo が git 管理下にありません: {repo}"))
+    base_ref = f"loop/{run_id}"
+    if runner.git(repo, "rev-parse", "--verify", base_ref).returncode != 0:
+        raise HTTPException(
+            409, err("branch_missing",
+                     f"前 run の成果ブランチ {base_ref} が repo に無いため続行できません"
+                     " (promote 後の削除など)。新規タスクとして作り直してください。"))
     _sp.Popen(["uv", "run", "runner.py", "continue", run_id, text], cwd=str(util.ROOT))
     return Response(status_code=202)
 
