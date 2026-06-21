@@ -122,7 +122,7 @@ def test_create_task_persists_all_fields(isolated_data, client):
     assert fm["accept"] == ["A1", "A2"], "空文字を落としていない"
     assert fm["verify"] == "pytest -q"
     assert fm["constraints"] == ["C1"]
-    assert fm["max_attempts"] == 3, "int 化されていない"
+    assert fm["max_attempts"] == "3", "quoted str で保存(YAML unquoted int は TaskFields(str) を壊す)"
 
 
 def test_task_detail_roundtrip(isolated_data, client):
@@ -203,9 +203,9 @@ def test_run_detail_exposes_empty_judgment_scaffold(isolated_data, client):
     assert r.status_code == 200, r.text
     j = r.json()
     assert j["summary"] == "事実"
-    assert set(j["judgment"]) == {"trust", "risk", "checks", "learning"}
+    assert set(j["judgment"]) == {"notes"}
     assert all(v == "" for v in j["judgment"].values()), "判断は空で出す(サーバが合成しない)"
-    assert [f[0] for f in j["judgment_fields"]] == ["trust", "risk", "checks", "learning"]
+    assert [f[0] for f in j["judgment_fields"]] == ["notes"]
 
 
 def test_runs_list_returns_json(isolated_data, client):
@@ -250,14 +250,13 @@ def test_judgment_empty_stays_empty(isolated_data, client):
 
 
 def test_judgment_persists_human_text(isolated_data, client):
-    """人間が書いた散文はそのまま契約ファイルへ着地する(中継のみ)。"""
+    """人間が書いた散文(単一 notes)はそのまま契約ファイルへ着地する(中継のみ)。"""
     md = _write_run(isolated_data, "j3")
     r = client.post("/api/runs/j3/judgment", json={
-        "trust": "信用できる", "risk": "なし", "checks": "境界値テスト", "learning": "学んだ"})
+        "notes": "信用できる。境界値テストを学んだ"})
     assert r.status_code == 204, r.text
     judged = runner.parse_judgment(md)
-    assert judged["trust"] == "信用できる"
-    assert judged["learning"] == "学んだ"
+    assert judged["notes"] == "信用できる。境界値テストを学んだ"
     assert "境界値テスト" in (isolated_data / "review-notes.md").read_text(encoding="utf-8")
 
 
@@ -389,7 +388,7 @@ def test_transcript_folds_events(isolated_data, client):
 def test_meta_exposes_config_single_source(isolated_data, client):
     j = client.get("/api/meta").json()
     assert j["statuses"] == util.STATUSES
-    assert [f[0] for f in j["judgment_fields"]] == ["trust", "risk", "checks", "learning"]
+    assert [f[0] for f in j["judgment_fields"]] == ["notes"]
     assert "none" in j["repos"]
 
 

@@ -179,9 +179,13 @@ def stop_run(run_id: str = Depends(valid_run_id)):
         raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
     (rd / "stop").write_text("", encoding="utf-8")
 
-    # 既に done なら何もしない(stop マーカーだけ残しても害は無いので置いたまま)。
+    # run.md がまだ無い(run 開始直後)。zombie 確定は md 前提なので、マーカーだけ残して return。
     md = util.RUNS / f"{run_id}.md"
-    if md.exists() and util._md_verdict_is_final(md):
+    if not md.exists():
+        return Response(status_code=204)
+
+    # 既に done なら何もしない(stop マーカーだけ残しても害は無いので置いたまま)。
+    if util._md_verdict_is_final(md):
         return Response(status_code=204)
 
     # zombie 判定: stream(役の subprocess が直接書く)が一定時間更新されていなければ
