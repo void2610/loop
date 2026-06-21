@@ -278,7 +278,8 @@ def fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: li
                  allowed_tools, max_attempts, status, base_branch="", no_pr=False) -> dict:
     """フォーム入力 → front-matter dict(順序を固定。空フィールドは省く)。
 
-    max_attempts は str 受けのまま int 化失敗時に黙って落とす現挙動を維持(契約後方互換)。
+    max_attempts は MD 上 quoted str("1" 等)で書き出す。YAML unquoted int は TaskFields(str) で
+    pydantic v2 strict が弾くため(実機で踏んだ)。値の妥当性は int 化試行で検査する。
     """
     fm: dict = {"id": task_id, "goal": (goal or "").strip("\n")}
     if (repo or "").strip():
@@ -297,9 +298,11 @@ def fm_from_form(task_id, goal, repo, accept: list[str], verify, constraints: li
         fm["constraints"] = cons
     if (allowed_tools or "").strip():
         fm["allowed_tools"] = allowed_tools.strip()
-    if str(max_attempts or "").strip():
+    ma_str = str(max_attempts or "").strip()
+    if ma_str:
         try:
-            fm["max_attempts"] = int(max_attempts)
+            int(ma_str)  # 妥当性検査のみ。実体は str で書き出して YAML quoted を強制する。
+            fm["max_attempts"] = ma_str
         except ValueError:
             pass
     fm["status"] = status if status in STATUSES else "todo"

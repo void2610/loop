@@ -833,7 +833,9 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
             fm["allowed_tools"] = at
         ma = obj.get("max_attempts")
         if isinstance(ma, int) and ma > 0:
-            fm["max_attempts"] = ma
+            # YAML が int を unquoted で書くと TaskFields(str) が pydantic v2 strict で 500 になる。
+            # 境界で str 化して MD 上は常に quoted("1" 等)で書き出す。
+            fm["max_attempts"] = str(ma)
         fm["status"] = "todo"
         if repo:  # 明示選択を優先(モデル推定を上書き)
             if repo == "default":

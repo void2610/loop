@@ -132,4 +132,4 @@ merge view で表示する。到達できなかった peer は一覧上部に「
 - **SQLite がおかしい**: `just reindex`(MD から完全再生成。データは MD が真実なので失われない)。
 - **生成が失敗する**: 文言を変えて再試行、または手動フォーム(`/tasks/new/manual`)で書く。
 - **ポート衝突で起動失敗**: `just app` は起動前に :3000/:8765 を kill するので通常気にしなくてよい。
-- **非冪等タスクの再試行で壊れる**: タスクに `max_attempts: 1` を指定。
+- **非冪等タスクの再試行で壊れる**: タスクに `max_attempts: "1"` を quoted で指定(unquoted int は YAML が int でパースして TaskDetail API が 500 になる)。
