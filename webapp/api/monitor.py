@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -24,10 +25,17 @@ router = APIRouter(tags=["monitor"])
 _PHASES = [["implementer", "Implementer"], ["verifier", "検証/Verifier"]]
 _ROLES = ("implementer", "verifier")
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
+# Last-Event-ID から role 単位の再開位置を引く。EventSource は直近 1 個しか送らないため
+# 受け取った role だけ進めて、もう一方は 0 から差分読みで自然同期する(seek 状態が無いと毎回 0)。
+_LEID_RE = re.compile(r"^(implementer|verifier):(\d+)$")
+_LEID_END_RE = re.compile(r"^end:(\d+)-(\d+)$")
 
 
-def _sse(event: str, data) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _sse(event: str, data, eid: str | None = None) -> str:
+    """SSE フレーム。eid を入れると EventSource が `Last-Event-ID` に保持し、再接続時に
+    自動でリクエストヘッダに付ける(過去 event 全部の重送防止)。"""
+    head = f"id: {eid}\n" if eid else ""
+    return f"{head}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.get("/monitor", response_model=schemas.MonitorSnapshot)
@@ -107,11 +115,40 @@ async def stream_monitor(request: Request):
 
 @router.get("/runs/{run_id}/stream")
 async def stream_run(request: Request, run_id: str = Depends(valid_run_id)):
-    """進行中 run のライブ transcript SSE。role別 stream.jsonl を tail して event/phase/end を配信。"""
+    """進行中 run のライブ transcript SSE。role別 stream.jsonl を tail して event/phase/end を配信。
+    Last-Event-ID で接続単位の重送を防ぐ(role:N で role 別 index、end:i-v で完了済み再接続を即終端)。"""
     rd = util.RUNS / run_id
+    md = util.RUNS / f"{run_id}.md"
+
+    leid = request.headers.get("last-event-id") or ""
+    # end 済みで再接続してきた場合は即終端(過去 event を流し直さない)
+    if _LEID_END_RE.match(leid) or (leid.startswith("end:") and not _LEID_RE.match(leid)):
+        async def end_only():
+            yield _sse("end", {"run_id": run_id}, eid=leid or "end:0-0")
+        return StreamingResponse(end_only(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
     async def gen():
-        counts = {r: 0 for r in _ROLES}  # role ごとに送信済みイベント数(差分のみ push)
+        counts: dict[str, int] = {r: 0 for r in _ROLES}  # role 別 送信済み event index
+        pos: dict[str, int] = {r: 0 for r in _ROLES}  # role 別 ファイル seek 位置
+        # Last-Event-ID で受け取った role は「N まで送信済み」として扱い、現状ファイルを全読みして
+        # 残り(=N+1 件目以降の蓄積分)を即送信、その後 pos=末尾 で差分のみ tail に移る。
+        # event 数とファイル行数は 1:1 対応しないため、seek 位置は「全読みのあと末尾」に確定させる必要がある。
+        m = _LEID_RE.match(leid)
+        if m:
+            r0 = m.group(1)
+            counts[r0] = int(m.group(2)) + 1
+            sp = rd / f"{r0}.stream.jsonl"
+            if sp.exists() and sp.stat().st_size > 0:
+                try:
+                    ev_all = util.parse_transcript(sp)
+                except OSError:
+                    ev_all = []
+                # 既送信(counts[r0] 件)を skip して残りを即吐く。次の tick は pos=末尾 から差分のみ。
+                for ev in ev_all[counts[r0]:]:
+                    yield _sse("event", {**ev, "role": r0}, eid=f"{r0}:{counts[r0]}")
+                    counts[r0] += 1
+                pos[r0] = sp.stat().st_size
+
         last_phase = None
         beat = 0
         while True:
@@ -119,7 +156,7 @@ async def stream_run(request: Request, run_id: str = Depends(valid_run_id)):
                 return
             status = util.read_run_status(run_id)
             phase = (status or {}).get("phase")
-            if phase and phase != last_phase:
+            if phase and phase != last_phase and phase != "done":
                 last_phase = phase
                 yield _sse("phase", {"phase": phase})
             for role in _ROLES:
@@ -127,16 +164,19 @@ async def stream_run(request: Request, run_id: str = Depends(valid_run_id)):
                 if not (sp.exists() and sp.stat().st_size > 0):
                     continue
                 try:
-                    events = util.parse_transcript(sp)
+                    new_events, new_pos = util.parse_transcript_from(sp, pos[role])
                 except OSError:
                     continue
-                if len(events) > counts[role]:
-                    for ev in events[counts[role]:]:
-                        yield _sse("event", {**ev, "role": role})
-                    counts[role] = len(events)
-            # 終了判定: 進行ステータスが消え(.run.lock 解放)run MD が出ている = 完了
-            if status is None and (util.RUNS / f"{run_id}.md").exists():
-                yield _sse("end", {"run_id": run_id})
+                pos[role] = new_pos
+                for ev in new_events:
+                    yield _sse("event", {**ev, "role": role}, eid=f"{role}:{counts[role]}")
+                    counts[role] += 1
+            # 終了判定: phase=done が一次根拠。fallback として status 消失 + run.md verdict 最終値。
+            done = (status is not None and phase == "done") or (
+                status is None and md.exists() and util._md_verdict_is_final(md))
+            if done:
+                yield _sse("end", {"run_id": run_id},
+                           eid=f"end:{counts['implementer']}-{counts['verifier']}")
                 return
             beat += 1
             yield _sse("heartbeat", {"t": beat})

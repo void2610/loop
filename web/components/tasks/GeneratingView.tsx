@@ -50,7 +50,14 @@ export function GeneratingView({
           setResult(d.result);
           setConnected(false);
         },
-        error: () => setConnected(false),
+        error: (e) => {
+          setConnected(false);
+          // sse.ts の error 多発しきい値で fatal=true が付与される。
+          // gen は result が無いとフローが続けられないので fail で確定させる。
+          if ((e as Event & { fatal?: boolean }).fatal && !result) {
+            setResult({ status: "fail", task_id: null, error: "live connection failed" });
+          }
+        },
       },
       undefined,
       peerBase,

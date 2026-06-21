@@ -73,6 +73,33 @@ function onEnd<T>(es: EventSource, cb?: (d: T) => void) {
   });
 }
 
+/** error 多発検知: 30 秒窓 / 5 回超で es.close() + fatal を通知。通常の Wi-Fi blip では発火しない。
+ *  EventSource の標準再接続(Last-Event-ID 自動付与)で resume されるため、過剰閉鎖は避けたい。 */
+function attachErrorWatch(
+  es: EventSource,
+  userHandler: ((e: Event) => void) | undefined,
+) {
+  const windowMs = 30_000;
+  const limit = 5;
+  const stamps: number[] = [];
+  let closed = false;
+  es.addEventListener("error", (e) => {
+    const now = Date.now();
+    while (stamps.length && now - stamps[0] > windowMs) stamps.shift();
+    stamps.push(now);
+    if (!closed && stamps.length > limit) {
+      closed = true;
+      try {
+        es.close();
+      } catch {
+        /* close は最善努力 */
+      }
+      (e as Event & { fatal?: boolean }).fatal = true;
+    }
+    if (userHandler) userHandler(e);
+  });
+}
+
 /** monitor 全体の SSE を購読。peerBase 指定で Fleet の他 host を購読。戻り値の close() で解放。 */
 export function subscribeMonitor(
   handlers: MonitorHandlers,
@@ -83,7 +110,7 @@ export function subscribeMonitor(
   on(es, "status", handlers.status);
   on(es, "run_done", handlers.run_done);
   on(es, "heartbeat", handlers.heartbeat);
-  if (handlers.error) es.addEventListener("error", handlers.error);
+  attachErrorWatch(es, handlers.error);
   return () => es.close();
 }
 
@@ -98,7 +125,7 @@ export function subscribeRun(
   on(es, "event", handlers.event);
   on(es, "phase", handlers.phase);
   onEnd(es, handlers.end);
-  if (handlers.error) es.addEventListener("error", handlers.error);
+  attachErrorWatch(es, handlers.error);
   return () => es.close();
 }
 
@@ -123,6 +150,6 @@ export function subscribeGen(
   const es = new EventSource(sseUrl(`/gen/${encodeURIComponent(genId)}/stream`, token, peerBase));
   on(es, "event", handlers.event);
   onEnd(es, handlers.end);
-  if (handlers.error) es.addEventListener("error", handlers.error);
+  attachErrorWatch(es, handlers.error);
   return () => es.close();
 }

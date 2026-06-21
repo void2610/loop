@@ -468,8 +468,51 @@ def _unwrap_command(text: str) -> tuple[str, str | None]:
     return _CMD_TAG_RE.sub("", text), name
 
 
+def _transcript_event_from(o: dict) -> list[dict]:
+    """1 JSONL レコードを 0 件以上の表示イベントに畳む(parse_transcript / parse_transcript_from 共有)。"""
+    if o.get("type") == "continuation":
+        return [{
+            "cls": "continuation",
+            "label": f"━━━ 人間の追加指示 #{o.get('continue_count', '?')} ━━━",
+            "body": str(o.get("instructions") or ""),
+            "ts": (o.get("at") or "")[11:19],
+        }]
+    if o.get("type") not in ("user", "assistant"):
+        return []
+    msg = o.get("message", {})
+    if not isinstance(msg, dict):
+        return []
+    ts = (o.get("timestamp") or "")[11:19]
+    content = msg.get("content")
+    if isinstance(content, str):
+        body, skill = _unwrap_command(content)
+        label = f"プロンプト · {skill}" if skill else "プロンプト"
+        return [{"cls": "user", "label": label, "body": body, "ts": ts}]
+    out: list[dict] = []
+    for b in content or []:
+        if not isinstance(b, dict):
+            continue
+        bt = b.get("type")
+        if bt == "text":
+            out.append({"cls": "assistant", "label": "アシスタント", "body": b.get("text", ""), "ts": ts})
+        elif bt == "thinking":
+            out.append({"cls": "think", "label": "思考", "body": b.get("thinking", ""), "ts": ts, "collapse": True})
+        elif bt == "tool_use":
+            body = json.dumps(b.get("input", {}), ensure_ascii=False, indent=2)
+            out.append({"cls": "tool", "label": f"🔧 {b.get('name', 'tool')}", "body": body, "ts": ts,
+                        "collapse": len(body) > 600})
+        elif bt == "tool_result":
+            c = b.get("content")
+            if isinstance(c, list):
+                c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict))
+            body = "" if c is None else str(c)
+            out.append({"cls": "result", "label": "↩ 結果", "body": body, "ts": ts, "collapse": len(body) > 400})
+    return out
+
+
 def parse_transcript(path: Path) -> list[dict]:
-    """セッション JSONL を会話イベント列に畳む(user/assistant のみ)。REST/SSE 共有。"""
+    """セッション JSONL を会話イベント列に畳む(user/assistant のみ)。REST snapshot 用。
+    SSE の毎秒ポール用には parse_transcript_from を使う(差分のみ読む)。"""
     events: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -479,43 +522,38 @@ def parse_transcript(path: Path) -> list[dict]:
             o = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # continue_run が挿入する境界 marker。中断と追加プロンプトが見える形で表示する。
-        if o.get("type") == "continuation":
-            events.append({
-                "cls": "continuation",
-                "label": f"━━━ 人間の追加指示 #{o.get('continue_count', '?')} ━━━",
-                "body": str(o.get("instructions") or ""),
-                "ts": (o.get("at") or "")[11:19],
-            })
-            continue
-        if o.get("type") not in ("user", "assistant"):
-            continue
-        msg = o.get("message", {})
-        if not isinstance(msg, dict):
-            continue
-        ts = (o.get("timestamp") or "")[11:19]
-        content = msg.get("content")
-        if isinstance(content, str):
-            body, skill = _unwrap_command(content)
-            label = f"プロンプト · {skill}" if skill else "プロンプト"
-            events.append({"cls": "user", "label": label, "body": body, "ts": ts})
-            continue
-        for b in content or []:
-            if not isinstance(b, dict):
-                continue
-            bt = b.get("type")
-            if bt == "text":
-                events.append({"cls": "assistant", "label": "アシスタント", "body": b.get("text", ""), "ts": ts})
-            elif bt == "thinking":
-                events.append({"cls": "think", "label": "思考", "body": b.get("thinking", ""), "ts": ts, "collapse": True})
-            elif bt == "tool_use":
-                body = json.dumps(b.get("input", {}), ensure_ascii=False, indent=2)
-                events.append({"cls": "tool", "label": f"🔧 {b.get('name', 'tool')}", "body": body, "ts": ts,
-                               "collapse": len(body) > 600})
-            elif bt == "tool_result":
-                c = b.get("content")
-                if isinstance(c, list):
-                    c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict))
-                body = "" if c is None else str(c)
-                events.append({"cls": "result", "label": "↩ 結果", "body": body, "ts": ts, "collapse": len(body) > 400})
+        events.extend(_transcript_event_from(o))
     return events
+
+
+def parse_transcript_from(path: Path, start_byte: int) -> tuple[list[dict], int]:
+    """start_byte からファイル末尾までの差分行のみを decode してイベントに畳む。
+    最後の改行までを 1 単位として読み、未完了な末尾行は次回 tick まで持ち越す(部分書き込み中の行を捨てない)。
+    返り値: (新規イベント列, 次回シーク位置)。SSE の poll でこれを毎秒呼ぶ。"""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return [], start_byte
+    if size <= start_byte:
+        return [], start_byte
+    with path.open("rb") as f:
+        f.seek(start_byte)
+        chunk = f.read(size - start_byte)
+    text = chunk.decode("utf-8", errors="replace")
+    # 末尾が改行で終わらない=途中書き込みの可能性。最後の \n まで進めて残りは次回回し。
+    last_nl = text.rfind("\n")
+    if last_nl < 0:
+        return [], start_byte  # 完全行が 1 つも無いので進めない
+    consumed = text[: last_nl + 1]
+    new_pos = start_byte + len(consumed.encode("utf-8"))
+    events: list[dict] = []
+    for line in consumed.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        events.extend(_transcript_event_from(o))
+    return events, new_pos

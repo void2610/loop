@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -27,8 +28,10 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connect
 _STALE_SECONDS = 180
 
 
-def _sse(event: str, data: Any) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _sse(event: str, data: Any, eid: str | None = None) -> str:
+    """SSE フレーム。eid を入れると EventSource が `Last-Event-ID` で再接続時に持ち回す。"""
+    head = f"id: {eid}\n" if eid else ""
+    return f"{head}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _gen_dir(gen_id: str) -> Path:
@@ -115,30 +118,62 @@ def gen_snapshot(gen_id: str):
 
 @router.get("/gen/{gen_id}/stream")
 async def stream_gen(request: Request, gen_id: str):
-    """Author のライブ transcript SSE。author.stream.jsonl を tail して event/end を配信。"""
+    """Author のライブ transcript SSE。author.stream.jsonl を tail して event/end を配信。
+    Last-Event-ID で再接続時の重送を防ぐ(int 単調 index、"end" で完了済み再接続を即終端)。"""
     d = _gen_dir(gen_id)
+    if not d.exists():
+        raise HTTPException(404, {"error": "not_found", "message": f"gen not found: {gen_id}"})
+
+    leid = request.headers.get("last-event-id") or ""
+
+    # end 済みの再接続: gen.json から result を再構成して即 end(過去 event を流し直さない)
+    if leid == "end":
+        result_path = d / "gen.json"
+        result: dict = {"status": "fail", "error": "result_read_failed"}
+        if result_path.exists():
+            try:
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        async def end_only():
+            yield _sse("end", {"gen_id": gen_id, "result": result}, eid="end")
+        return StreamingResponse(end_only(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
     async def gen():
         sent = 0
+        pos = 0  # author.stream.jsonl の seek 位置(差分のみ JSON decode)
         beat = 0
-        # ディレクトリが出来るまで少し待つ(POST 直後の race を吸収)
-        for _ in range(20):
-            if d.exists():
-                break
-            await asyncio.sleep(0.2)
+        # 受け取った Last-Event-ID(N)分は送信済みとして扱い、ファイル全読みで残りを即吐く。
+        # event 数とファイル行数は 1:1 対応しないため、seek は「全読みのあと末尾」に確定させる。
+        m = re.match(r"^(\d+)$", leid)
+        replay: list[dict] = []
+        if m:
+            sent = int(m.group(1)) + 1
+            sp0 = d / "author.stream.jsonl"
+            if sp0.exists() and sp0.stat().st_size > 0:
+                try:
+                    ev_all = util.parse_transcript(sp0)
+                except OSError:
+                    ev_all = []
+                replay = list(ev_all[sent:])
+                pos = sp0.stat().st_size
+        for ev in replay:
+            yield _sse("event", {**ev, "role": "author"}, eid=str(sent))
+            sent += 1
+
         while True:
             if await request.is_disconnected():
                 return
             sp = d / "author.stream.jsonl"
             if sp.exists() and sp.stat().st_size > 0:
                 try:
-                    events = util.parse_transcript(sp)
+                    new_events, pos = util.parse_transcript_from(sp, pos)
                 except OSError:
-                    events = []
-                if len(events) > sent:
-                    for ev in events[sent:]:
-                        yield _sse("event", {**ev, "role": "author"})
-                    sent = len(events)
+                    new_events = []
+                for ev in new_events:
+                    yield _sse("event", {**ev, "role": "author"}, eid=str(sent))
+                    sent += 1
             # gen.json があれば完了 → result を end に載せて終了
             result_path = d / "gen.json"
             if result_path.exists():
@@ -146,7 +181,7 @@ async def stream_gen(request: Request, gen_id: str):
                     result = json.loads(result_path.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     result = {"status": "fail", "error": "result_read_failed"}
-                yield _sse("end", {"gen_id": gen_id, "result": result})
+                yield _sse("end", {"gen_id": gen_id, "result": result}, eid="end")
                 return
             # stream が一定時間更新なし = kill された残骸 → fail で end を出して終了
             if sp.exists():
@@ -156,7 +191,7 @@ async def stream_gen(request: Request, gen_id: str):
                         "gen_id": gen_id,
                         "result": {"status": "fail", "task_id": None,
                                    "error": f"aborted (no result, stream silent {int(age)}s)"},
-                    })
+                    }, eid="end")
                     return
             beat += 1
             yield _sse("heartbeat", {"t": beat})

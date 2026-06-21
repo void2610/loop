@@ -63,7 +63,11 @@ export function useRunLive(runId: string, token?: string, peerBase?: string): Ru
           setEnded(true);
           setConnected(false);
         },
-        error: () => setConnected(false),
+        error: (e) => {
+          setConnected(false);
+          // sse.ts の error 多発しきい値で fatal=true が付与される。reload を促す UI のため ended にする。
+          if ((e as Event & { fatal?: boolean }).fatal) setEnded(true);
+        },
       },
       token,
       peerBase,
