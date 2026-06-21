@@ -60,6 +60,19 @@ function on<T>(es: EventSource, name: string, cb?: (d: T) => void) {
   });
 }
 
+/** end イベントで EventSource を close(EventSource は接続切れで自動再接続するため、終了を明示しないと
+ *  過去イベントが無限ループで再送される)。 */
+function onEnd<T>(es: EventSource, cb?: (d: T) => void) {
+  es.addEventListener("end", (e) => {
+    try {
+      if (cb) cb(JSON.parse((e as MessageEvent).data) as T);
+    } catch {
+      /* JSON でない場合も close は必ず実行 */
+    }
+    es.close();
+  });
+}
+
 /** monitor 全体の SSE を購読。peerBase 指定で Fleet の他 host を購読。戻り値の close() で解放。 */
 export function subscribeMonitor(
   handlers: MonitorHandlers,
@@ -84,7 +97,7 @@ export function subscribeRun(
   const es = new EventSource(sseUrl(`/runs/${encodeURIComponent(runId)}/stream`, token, peerBase));
   on(es, "event", handlers.event);
   on(es, "phase", handlers.phase);
-  on(es, "end", handlers.end);
+  onEnd(es, handlers.end);
   if (handlers.error) es.addEventListener("error", handlers.error);
   return () => es.close();
 }
@@ -109,7 +122,7 @@ export function subscribeGen(
 ): () => void {
   const es = new EventSource(sseUrl(`/gen/${encodeURIComponent(genId)}/stream`, token, peerBase));
   on(es, "event", handlers.event);
-  on(es, "end", handlers.end);
+  onEnd(es, handlers.end);
   if (handlers.error) es.addEventListener("error", handlers.error);
   return () => es.close();
 }
