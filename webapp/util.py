@@ -209,11 +209,18 @@ def repo_default_branch(repo: str | None) -> str | None:
     return runner.default_branch(path)
 
 
+_FINAL_VERDICTS = {"pass", "fail", "handoff", "timeout", "stopped", "awaiting-merge"}
+
+
 def read_run_status(run_id: str | None = None) -> dict | None:
     """data/.run.lock(=ロック兼ステータス)を読む。現 _read_run_status に run_id フィルタを追加。
 
     並列化トラック T で per-run ステータスが runs/<id>/status.json 配列へ分裂しても
     呼び出し側が run_id キーで読めるよう、引数で run_id を受ける契約に固定(§8.1.3)。
+
+    残骸検出: cmd_run / cmd_continue が異常終了すると lock が残り「永久に実行中」表示になる。
+    対応する run.md があり verdict が最終値(pass/fail/handoff/timeout/stopped/awaiting-merge)なら、
+    残骸と判断して lock を unlink し None を返す(UI 上の active 表示を解除する)。
     """
     lock = DATA / ".run.lock"
     if not lock.exists():
@@ -224,11 +231,40 @@ def read_run_status(run_id: str | None = None) -> dict | None:
         d = {}
     if not isinstance(d, dict):
         d = {}
-    if run_id is not None and d.get("run_id") != run_id:
+    lock_run_id = d.get("run_id")
+    # 残骸チェック: 対応する run.md の verdict が最終値なら lock を unlink して未実行扱い
+    if lock_run_id:
+        md = RUNS / f"{lock_run_id}.md"
+        if md.exists() and _md_verdict_is_final(md):
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+            return None
+    if run_id is not None and lock_run_id != run_id:
         return None
     d.setdefault("phase", "start")
     _add_elapsed(d)
     return d
+
+
+def _md_verdict_is_final(md: "Path") -> bool:
+    """run.md の front-matter から verdict を読み、最終値か判定。"""
+    try:
+        text = md.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    for line in lines[1:]:
+        s = line.strip()
+        if s == "---":
+            break
+        if s.startswith("verdict:"):
+            v = s.split(":", 1)[1].strip().strip("'\"")
+            return v in _FINAL_VERDICTS
+    return False
 
 
 def _add_elapsed(d: dict) -> dict:

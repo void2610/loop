@@ -2362,6 +2362,12 @@ def cmd_continue(run_id: str, instructions: str) -> int:
         return 0
     finally:
         clear_run_status(run_id, locals().get("final"))
+        # continue は cmd_run と違って .run.lock の O_EXCL claim を取らないが、write_run_status が
+        # ミラー書きするので残骸が残る。完了時に必ず unlink して「永久に実行中」表示を防ぐ。
+        try:
+            (DATA / ".run.lock").unlink(missing_ok=True)
+        except OSError:
+            pass
         try:
             if serial:
                 leave_serial(repo, orig_ref, run_id)
