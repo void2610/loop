@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { api, ApiError, type RunDetail } from "@/lib/api";
+import { ApiError, type RunDetail } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
+import { RunHostProvider } from "@/lib/runHost";
 import { MessageSquareText } from "lucide-react";
 
 import { repoLabel } from "@/lib/repoLabel";
@@ -36,7 +38,8 @@ function isReviewed(fm: { [key: string]: unknown }): boolean {
 
 // run 詳細 + 判断。j/k で前後 run、⌘↵ で保存(§6.5)。
 // 左カラム=事実(front-matter / summary / Verifier / 証拠)、右カラム=判断ペイン。
-export function RunDetailView({ runId }: { runId: string }) {
+// Fleet: host を渡すと当該 peer 経由(/api/peer/<host>/...)で取得・書き込み。空なら自 host。
+export function RunDetailView({ runId, host }: { runId: string; host?: string }) {
   const router = useRouter();
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +56,7 @@ export function RunDetailView({ runId }: { runId: string }) {
     setError(null);
     (async () => {
       try {
-        const d = await api.runDetail(runId);
+        const d = await peerApi.runDetail(host, runId);
         if (!cancelled) setDetail(d);
       } catch (e) {
         if (!cancelled) {
@@ -64,14 +67,15 @@ export function RunDetailView({ runId }: { runId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [runId, reloadKey]);
+  }, [runId, reloadKey, host]);
 
   // 前後 run の id を一覧順(started_at DESC)から導出。j=次(下)/k=前(上)。
+  // Fleet: 同じ host の run 内で前後を辿る(host を跨がない方が混乱しない)。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const list = await api.listRuns();
+        const list = await peerApi.listRuns(host);
         if (cancelled) return;
         const ids = list.runs.map((r) => r.run_id);
         const i = ids.indexOf(runId);
@@ -86,15 +90,16 @@ export function RunDetailView({ runId }: { runId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, host]);
 
+  const hostQuery = host ? `?host=${encodeURIComponent(host)}` : "";
   const goNext = useCallback(() => {
-    if (neighbors.next) router.push(`/runs/${encodeURIComponent(neighbors.next)}`);
-  }, [neighbors.next, router]);
+    if (neighbors.next) router.push(`/runs/${encodeURIComponent(neighbors.next)}${hostQuery}`);
+  }, [neighbors.next, router, hostQuery]);
 
   const goPrev = useCallback(() => {
-    if (neighbors.prev) router.push(`/runs/${encodeURIComponent(neighbors.prev)}`);
-  }, [neighbors.prev, router]);
+    if (neighbors.prev) router.push(`/runs/${encodeURIComponent(neighbors.prev)}${hostQuery}`);
+  }, [neighbors.prev, router, hostQuery]);
 
   // j/k はフィールド外のときのみ。⌘↵ はフィールド内でも保存(フォーム側でも捕捉)。
   useEffect(() => {
@@ -123,12 +128,14 @@ export function RunDetailView({ runId }: { runId: string }) {
 
   if (error) {
     return (
+      <RunHostProvider value={host}>
       <div className="space-y-4">
         <Link href="/runs" className="text-sm text-primary hover:underline">
           ← 一覧
         </Link>
         <p className="text-sm text-verdict-fail">{error}</p>
       </div>
+      </RunHostProvider>
     );
   }
 
@@ -142,11 +149,17 @@ export function RunDetailView({ runId }: { runId: string }) {
   const repo = fmString(fm, "repo");
 
   return (
+    <RunHostProvider value={host}>
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/runs" className="text-sm text-primary hover:underline">
           ← 一覧
         </Link>
+        {host ? (
+          <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+            host: {host}
+          </span>
+        ) : null}
         <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
           <button
             type="button"
@@ -180,7 +193,7 @@ export function RunDetailView({ runId }: { runId: string }) {
         )}
         <div className="ml-auto flex items-center gap-2">
           <Link
-            href={`/runs/${encodeURIComponent(detail.run_id)}/transcript`}
+            href={`/runs/${encodeURIComponent(detail.run_id)}/transcript${hostQuery}`}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             <MessageSquareText />
@@ -224,5 +237,6 @@ export function RunDetailView({ runId }: { runId: string }) {
         </div>
       </div>
     </div>
+    </RunHostProvider>
   );
 }

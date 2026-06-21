@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-import { api, ApiError } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
+import { useRunHost } from "@/lib/runHost";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { DiffView } from "./diff-view";
@@ -23,6 +25,7 @@ function formatBytes(n: number): string {
 }
 
 function LazyFile({ runId, name, title, render }: LazyFileProps) {
+  const host = useRunHost();
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,14 +35,14 @@ function LazyFile({ runId, name, title, render }: LazyFileProps) {
     setLoading(true);
     setError(null);
     try {
-      const text = await api.runFile(runId, name);
+      const text = await peerApi.runFile(host, runId, name);
       setBody(text);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "読み込みに失敗しました");
     } finally {
       setLoading(false);
     }
-  }, [runId, name]);
+  }, [runId, name, host]);
 
   // 展開され、かつ未取得のときだけ 1 回 fetch する。
   useEffect(() => {
@@ -73,6 +76,7 @@ type EvidenceFile = { name: string; size: number; exists: boolean };
 
 // 証拠パネル: meta(存在/サイズ)を先に取り、本文はオンデマンドで遅延ロード(§2.2)。
 export function EvidencePanel({ runId }: { runId: string }) {
+  const host = useRunHost();
   const [files, setFiles] = useState<EvidenceFile[] | null>(null);
   const [metaError, setMetaError] = useState<string | null>(null);
 
@@ -80,7 +84,7 @@ export function EvidencePanel({ runId }: { runId: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const meta = await api.runEvidence(runId);
+        const meta = await peerApi.runEvidence(host, runId);
         if (!cancelled) setFiles(meta.files as EvidenceFile[]);
       } catch (e) {
         if (!cancelled) setMetaError(e instanceof ApiError ? e.message : "取得に失敗しました");
@@ -89,7 +93,7 @@ export function EvidencePanel({ runId }: { runId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, host]);
 
   const present = (name: string): EvidenceFile | undefined =>
     files?.find((f) => f.name === name && f.exists);

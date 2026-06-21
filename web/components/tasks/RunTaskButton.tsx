@@ -3,12 +3,15 @@
 import { useState } from "react";
 
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 
 // 当該タスクを今すぐ background 実行する(x-loop-exec)。
 // .run.lock 進行中は API が 409 busy を返す → そのまま事実として表示する。
+// Fleet: host を渡すと該当 peer 経由で実行する(host 空なら自 host)。
 export function RunTaskButton({
   taskId,
+  host,
   disabled,
   confirmRun = false,
   variant,
@@ -17,6 +20,7 @@ export function RunTaskButton({
   onStarted,
 }: {
   taskId: string;
+  host?: string;
   disabled?: boolean;
   confirmRun?: boolean;
   variant?: ButtonProps["variant"];
@@ -37,7 +41,7 @@ export function RunTaskButton({
     setMsg(null);
     setBusy(true);
     try {
-      const res = await api.runTask(taskId);
+      const res = await peerApi.runTask(host, taskId);
       if (res.accepted) {
         setMsg("▶ 実行を開始しました(background)");
         onStarted?.();

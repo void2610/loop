@@ -127,15 +127,20 @@ export function RunsTable({
             </TableRow>
             );
           })}
-          {runs.map((r) => (
+          {runs.map((r) => {
+            const rowHost = (r as RunRowWithHost).host;
+            const detailHref = `/runs/${encodeURIComponent(r.run_id)}${
+              rowHost ? `?host=${encodeURIComponent(rowHost)}` : ""
+            }`;
+            return (
             <TableRow
               key={r.run_id}
               className="cursor-pointer transition-colors hover:bg-accent/40"
-              onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}`)}
+              onClick={() => router.push(detailHref)}
             >
               {showHost ? (
                 <TableCell className="font-mono text-xs text-muted-foreground">
-                  {(r as RunRowWithHost).host ?? ""}
+                  {rowHost ?? ""}
                 </TableCell>
               ) : null}
               <TableCell>
@@ -161,11 +166,13 @@ export function RunsTable({
                 <ArchiveRunButton
                   runId={r.run_id}
                   archived={!!r.archived}
+                  host={rowHost}
                   onChanged={() => onChanged?.()}
                 />
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
         </TableBody>
       </Table>
     </div>

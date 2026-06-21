@@ -15,10 +15,15 @@ import type {
 } from "./types";
 
 const BASE = process.env.API_BASE ?? "http://127.0.0.1:8765";
+// peer 経由は Next フロント(:3000)の /api/peer/<host>/* を server-side で叩く(rewrite で peer backend に転送)。
+const FRONT_BASE = process.env.FRONT_BASE ?? "http://127.0.0.1:3000";
 
-async function get<R>(path: string): Promise<StatsEnvelope<R> | null> {
+async function get<R>(path: string, host?: string): Promise<StatsEnvelope<R> | null> {
+  const url = host
+    ? `${FRONT_BASE}/api/peer/${encodeURIComponent(host)}${path}`
+    : `${BASE}/api${path}`;
   try {
-    const res = await fetch(`${BASE}/api${path}`, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as StatsEnvelope<R>;
   } catch {
@@ -27,10 +32,11 @@ async function get<R>(path: string): Promise<StatsEnvelope<R> | null> {
   }
 }
 
+/** Fleet 用: host を指定するとその peer の analytics を取る(空なら自 host)。 */
 export const analytics = {
-  summary: () => get<SummaryRow>("/analytics/summary"),
-  passRateBySkill: () => get<PassRateRow>("/analytics/pass-rate-by-skill"),
-  verdictSummary: () => get<VerdictSummaryRow>("/analytics/verdict-summary"),
-  gamingSuspects: () => get<GamingSuspectRow>("/analytics/gaming-suspects"),
-  costTimeline: () => get<CostTimelineRow>("/analytics/cost-timeline"),
+  summary: (host?: string) => get<SummaryRow>("/analytics/summary", host),
+  passRateBySkill: (host?: string) => get<PassRateRow>("/analytics/pass-rate-by-skill", host),
+  verdictSummary: (host?: string) => get<VerdictSummaryRow>("/analytics/verdict-summary", host),
+  gamingSuspects: (host?: string) => get<GamingSuspectRow>("/analytics/gaming-suspects", host),
+  costTimeline: (host?: string) => get<CostTimelineRow>("/analytics/cost-timeline", host),
 };

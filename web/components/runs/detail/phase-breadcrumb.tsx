@@ -2,8 +2,12 @@
 
 import { Check, Loader2, AlertTriangle } from "lucide-react";
 
+import * as React from "react";
+
 import { cn } from "@/lib/utils";
 import { useRunLive } from "@/components/monitor/useRunLive";
+import { getFleetInfo, resolvePeerBase, type FleetInfo } from "@/lib/fleet";
+import { useRunHost } from "@/lib/runHost";
 import { VerdictBadge } from "@/components/verdict-badge";
 
 // run のワークフロー位置を可視化するパンくず風ステッパ。事実の表示のみ(§1.1: 判断生成しない)。
@@ -175,8 +179,17 @@ export function PhaseBreadcrumb({
   verdict: string;
   prUrl?: string;
 }) {
+  // Fleet: host が設定されているとき peer の SSE を購読する(fleet info を初回 1 回 fetch)。
+  const host = useRunHost();
+  const [fleet, setFleet] = React.useState<FleetInfo | null>(null);
+  React.useEffect(() => {
+    void getFleetInfo()
+      .then(setFleet)
+      .catch(() => setFleet({ self_name: null, peers: [] }));
+  }, []);
+  const peerBase = resolvePeerBase(fleet, host);
   // SSE 購読: 進行中なら phase 変化を near-real-time で受け取る。完了済み run は接続直後 end が来て静的表示。
-  const live = useRunLive(runId);
+  const live = useRunLive(runId, undefined, peerBase);
   const states = deriveStates({
     phase: live.phase,
     verdict,

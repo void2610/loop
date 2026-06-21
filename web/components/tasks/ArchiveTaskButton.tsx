@@ -4,15 +4,19 @@ import { useState } from "react";
 import { Archive, ArchiveRestore } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 
 // タスクのアーカイブ/解除。削除はしない(ログは資産)。archived フラグを立てて UI から隠すだけ。
+// Fleet: host を渡すと該当 peer 経由でアーカイブ操作。
 export function ArchiveTaskButton({
   taskId,
+  host,
   archived = false,
   onChanged,
 }: {
   taskId: string;
+  host?: string;
   archived?: boolean;
   onChanged?: () => void;
 }) {
@@ -23,7 +27,7 @@ export function ArchiveTaskButton({
     setError(null);
     setBusy(true);
     try {
-      await api.archiveTask(taskId, !archived);
+      await peerApi.archiveTask(host, taskId, !archived);
       onChanged?.();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "操作に失敗しました");

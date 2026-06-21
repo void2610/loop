@@ -68,11 +68,15 @@ data/(別 private repo / engine からは .gitignore / 複数 PC で共有):
 >   `runner.load_config()` から読む)。peer の `:3000` フロントを Origin として `:8765` を叩ける。
 > - frontend は `lib/sse.ts` の `subscribe*(handlers, token, peerBase)` の第3引数で peer base URL を
 >   指定(`:3000` を `:8765` に置換して EventSource を開く)。
-> **UI の peer 配線(2d)**: `useMonitorStream(peers)` が全 peer の monitor SSE を並列購読し host バッジ付きで
+> **UI の peer 配線(2d/2e)**: `useMonitorStream(peers)` が全 peer の monitor SSE を並列購読し host バッジ付きで
 > merge。`/runs/<id>/live?host=<host>` で他 host のライブ transcript / 介入 / 停止が叩ける(`InterventionPanel`
 > `StopRunButton` は `host` prop を peerApi 経由で `/api/peer/<host>/...` に POST)。Runs 一覧上部に dispatch host
 > セレクタが出る(`peers >= 2` 時)。**lib/api.ts は凍結面**で、peer 経由の write/read helper は `lib/fleet.ts`
-> の `peerApi.*` に集約(`host` 空=自 host=従来挙動)。
+> の `peerApi.*` に集約(`host` 空=自 host=従来挙動)。`/runs/<id>` 詳細・`/tasks`・`/dashboard` も同じ pattern で
+> 全 host から merge(`RunHostContext` で詳細子コンポーネントに host を伝播、`fetchAllPeerTasks` でタスク並列 fetch、
+> Dashboard は server-side で各 peer の analytics を集約)。
+> **2 台目以降の追加**: 各 PC で data repo を clone → `data/hosts/<host>/` を切る → `loop.local.toml` に `[data]` と
+> `[fleet]`(全 PC 同じ peers リスト)を書く → `just app`。Tailnet に互いに見えていれば即 merge view に並ぶ。
 
 > **実行機構(現行)**: 全役は **`RoleSession`(`claude -p --input-format/--output-format stream-json` の永続双方向セッション)**で動く。one-shot(`-p <prompt>`)と `--resume` 再 spawn は撤去。追加指示(revise / 人間介入)はすべて `send()` で**同一セッションへ user メッセージ注入**に一本化。`run_role` はその単発ラッパ(Verifier 等)。
 > **人間介入(awaiting)= 責務分離**: ①**実装中**の方針疑問/権限不足は Implementer が `NEEDS_HUMAN:` 合図でターンを区切る → `_drive_implementer` が **Verifier より前に** `await_human` で人間へ(主経路)。②**実装後**の結果/テスト欠陥は Verifier の責務で `revise` 自動修正(人間不要)。③ Verifier の handoff / revise 上限超過は**最後の安全網**としてだけ人間へ。いずれも `runs/<id>/inbox.jsonl` 待ち(`intervention_timeout_seconds`、超過で handoff)。Web の `/runs/<id>/live` が `intervention` を出し `POST /api/runs/<id>/message` で同一セッションへ注入。**GUI は事実表示のみ・選択肢/判断を生成しない**。

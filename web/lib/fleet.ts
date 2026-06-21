@@ -6,7 +6,19 @@
  * BFF は作らない(Next の rewrites は静的で、動的 peer 解決には不向き)。
  * server-side fetch なので CORS 関係なし。peer unreachable は per-host エラーとして残す(全体は落とさない)。
  */
-import { ApiError, type LiveSnapshot, type RunListResponse, type RunRow, type RunStartResult } from "./api";
+import {
+  ApiError,
+  type EvidenceMeta,
+  type JudgmentInput,
+  type LiveSnapshot,
+  type RunDetail,
+  type RunListResponse,
+  type RunRow,
+  type RunStartResult,
+  type TaskDetail,
+  type TaskListResponse,
+  type TranscriptResponse,
+} from "./api";
 import type { components } from "./types";
 
 export type FleetInfo = components["schemas"]["FleetInfo"];
@@ -113,8 +125,43 @@ async function peerFetchJson<T>(
   return (await res.json()) as T;
 }
 
+/** peer 経由で生テキスト(証拠ファイル本文等)を取る。404 等は ApiError。 */
+async function peerFetchText(host: string | undefined, path: string): Promise<string> {
+  const url = host ? `/api/peer/${encodeURIComponent(host)}${path}` : `/api${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    throw new ApiError(0, e instanceof Error ? e.message : "network error");
+  }
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return await res.text();
+}
+
+function qsString(params?: RunsParams): string {
+  if (!params) return "";
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
+  }
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
 /** Fleet 用に host を指定できる版の write/read API。host 空なら api.* と同じ自 host 経由。 */
 export const peerApi = {
+  // 一覧 / 詳細 / 証拠 / transcript
+  listRuns: (host: string | undefined, params?: RunsParams) =>
+    peerFetchJson<RunListResponse>(host, `/runs${qsString(params)}`),
+  runDetail: (host: string | undefined, runId: string) =>
+    peerFetchJson<RunDetail>(host, `/runs/${encodeURIComponent(runId)}`),
+  runEvidence: (host: string | undefined, runId: string) =>
+    peerFetchJson<EvidenceMeta>(host, `/runs/${encodeURIComponent(runId)}/evidence`),
+  runFile: (host: string | undefined, runId: string, name: string) =>
+    peerFetchText(host, `/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(name)}`),
+  runTranscript: (host: string | undefined, runId: string) =>
+    peerFetchJson<TranscriptResponse>(host, `/runs/${encodeURIComponent(runId)}/transcript`),
+  // ライブ / 介入 / 停止
   runLive: (host: string | undefined, runId: string) =>
     peerFetchJson<LiveSnapshot>(host, `/runs/${encodeURIComponent(runId)}/live`),
   sendMessage: (host: string | undefined, runId: string, text: string) =>
@@ -125,10 +172,77 @@ export const peerApi = {
     }),
   stopRun: (host: string | undefined, runId: string) =>
     peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/stop`, { method: "POST" }),
+  // 種類A: dispatch / 判断書き戻し / アーカイブ
   dispatch: (host: string | undefined) =>
     peerFetchJson<RunStartResult>(host, `/dispatch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     }),
+  submitJudgment: (host: string | undefined, runId: string, j: JudgmentInput) =>
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/judgment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(j),
+    }),
+  archiveRun: (host: string | undefined, runId: string, archived: boolean) =>
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }),
+  // tasks
+  listTasks: (host: string | undefined, params?: { include_archived?: boolean }) => {
+    const qs = params?.include_archived ? `?include_archived=true` : "";
+    return peerFetchJson<TaskListResponse>(host, `/tasks${qs}`);
+  },
+  taskDetail: (host: string | undefined, taskId: string) =>
+    peerFetchJson<TaskDetail>(host, `/tasks/${encodeURIComponent(taskId)}`),
+  runTask: (host: string | undefined, taskId: string) =>
+    peerFetchJson<RunStartResult>(host, `/tasks/${encodeURIComponent(taskId)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+  archiveTask: (host: string | undefined, taskId: string, archived: boolean) =>
+    peerFetchJson<void>(host, `/tasks/${encodeURIComponent(taskId)}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }),
 };
+
+/** Fleet 用に host を持たせた TaskRow(merge view で「どの PC のタスクか」を出す)。 */
+export type TaskRowWithHost = components["schemas"]["TaskRow"] & { host: string };
+
+/** 全 peers に並列で /tasks を fetch して per-host のままで返す。merge は呼び出し側で。 */
+export async function fetchAllPeerTasks(
+  peers: FleetPeer[],
+  params?: { include_archived?: boolean },
+): Promise<{ peer: FleetPeer; ok: boolean; error?: string; tasks: TaskRowWithHost[]; last: Record<string, components["schemas"]["LastRun"]>; running: boolean; generating: boolean }[]> {
+  return Promise.all(
+    peers.map(async (p) => {
+      try {
+        const res = await peerApi.listTasks(p.is_self ? undefined : p.name, params);
+        return {
+          peer: p,
+          ok: true,
+          tasks: res.tasks.map((t) => ({ ...t, host: p.name })),
+          last: res.last,
+          running: res.running,
+          generating: res.generating,
+        };
+      } catch (e) {
+        return {
+          peer: p,
+          ok: false,
+          error: e instanceof Error ? e.message : "unreachable",
+          tasks: [],
+          last: {},
+          running: false,
+          generating: false,
+        };
+      }
+    }),
+  );
+}

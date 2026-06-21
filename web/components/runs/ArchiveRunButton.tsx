@@ -4,18 +4,26 @@ import { useState } from "react";
 import { Archive, ArchiveRestore } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
+import { useRunHost } from "@/lib/runHost";
 
 // run のアーカイブ/解除。削除はしない(run=契約・真実の源)。UI から隠すだけ。
+// Fleet: RunHostContext から host を取り、該当 peer 経由でアーカイブ操作する。
 export function ArchiveRunButton({
   runId,
   archived = false,
   onChanged,
+  host: hostProp,
 }: {
   runId: string;
   archived?: boolean;
   onChanged?: () => void;
+  /** Context を介さない呼び出し(RunsTable 行)で直接 host を渡す抜け道 */
+  host?: string;
 }) {
+  const ctxHost = useRunHost();
+  const host = hostProp ?? ctxHost;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +31,7 @@ export function ArchiveRunButton({
     setError(null);
     setBusy(true);
     try {
-      await api.archiveRun(runId, !archived);
+      await peerApi.archiveRun(host, runId, !archived);
       onChanged?.();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "操作に失敗しました");

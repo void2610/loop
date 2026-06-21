@@ -4,14 +4,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
-import { api, ApiError, type TranscriptEvent } from "@/lib/api";
+import { ApiError, type TranscriptEvent } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 import { Card, CardContent } from "@/components/ui/card";
 import { TranscriptEventView } from "@/components/monitor/TranscriptEventView";
 
 // 完成 run の transcript を会話ビューで表示(レガシー /run/<id>/transcript の移植)。
 // 整形済みイベント(_parse_transcript 由来)を GET /api/runs/{id}/transcript から取り、
 // monitor のライブ表示と同じ TranscriptEventView で描く(事実の整形のみ。要約・判断はしない)。
-export function TranscriptView({ runId }: { runId: string }) {
+// Fleet: host を渡すと該当 peer 経由(/api/peer/<host>/...)で取得。
+export function TranscriptView({ runId, host }: { runId: string; host?: string }) {
   const [events, setEvents] = useState<TranscriptEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,7 +21,7 @@ export function TranscriptView({ runId }: { runId: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const data = await api.runTranscript(runId);
+        const data = await peerApi.runTranscript(host, runId);
         const evs = (data.events ?? []) as unknown as TranscriptEvent[];
         if (!cancelled) setEvents(evs);
       } catch (e) {
@@ -37,17 +39,22 @@ export function TranscriptView({ runId }: { runId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, host]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link
-          href={`/runs/${encodeURIComponent(runId)}`}
+          href={`/runs/${encodeURIComponent(runId)}${host ? `?host=${encodeURIComponent(host)}` : ""}`}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> run 詳細へ戻る
         </Link>
+        {host ? (
+          <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+            host: {host}
+          </span>
+        ) : null}
       </div>
       <div>
         <h1 className="text-xl font-bold tracking-tight">transcript</h1>

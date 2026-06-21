@@ -41,26 +41,74 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  const [summaryEnv, passRateEnv, verdictEnv, gamingEnv, costEnv] = await Promise.all([
-    analytics.summary(),
-    analytics.passRateBySkill(),
-    analytics.verdictSummary(),
-    analytics.gamingSuspects(),
-    analytics.costTimeline(),
-  ]);
+type SummaryShape = {
+  total_runs?: number; reviewed?: number; unreviewed?: number;
+  pass?: number; fail?: number; distinct_skills?: number;
+};
 
-  const summary = summaryEnv?.rows[0] ?? null;
-  const passRows = passRateEnv?.rows ?? [];
-  const verdictRows = verdictEnv?.rows ?? [];
-  const gamingRows = gamingEnv?.rows ?? [];
-  const costRows = costEnv?.rows ?? [];
+/** Fleet 用: 各 peer の analytics を server-side で取り、rows / summary を host 横断で合算する。 */
+async function fetchFleetAnalytics() {
+  let peerNames: string[] = [];
+  try {
+    const res = await fetch(`${process.env.API_BASE ?? "http://127.0.0.1:8765"}/api/fleet/peers`, {
+      cache: "no-store",
+    });
+    if (res.ok) {
+      const info = (await res.json()) as {
+        self_name: string | null;
+        peers: { name: string; is_self: boolean }[];
+      };
+      // 自 host は host=undefined(:8765 直叩き)、それ以外は peer 経由
+      peerNames = info.peers.filter((p) => !p.is_self).map((p) => p.name);
+    }
+  } catch {
+    // Fleet off / 取得失敗時は自 host のみ
+  }
+  return Promise.all(
+    [undefined, ...peerNames].map(async (h) => ({
+      host: h,
+      summary: await analytics.summary(h),
+      passRate: await analytics.passRateBySkill(h),
+      verdict: await analytics.verdictSummary(h),
+      gaming: await analytics.gamingSuspects(h),
+      cost: await analytics.costTimeline(h),
+    })),
+  );
+}
+
+export default async function DashboardPage() {
+  const all = await fetchFleetAnalytics();
+  const isFleet = all.length > 1;
+
+  // summary は host 横断で単純合算(skills は最大値 = グローバル一意の重複なし前提)
+  const summaryItems = all
+    .map((r) => r.summary?.rows[0] as SummaryShape | undefined)
+    .filter((x): x is SummaryShape => !!x);
+  const summary = summaryItems.length === 0 ? null : {
+    total_runs: summaryItems.reduce((a, x) => a + (x.total_runs ?? 0), 0),
+    reviewed: summaryItems.reduce((a, x) => a + (x.reviewed ?? 0), 0),
+    unreviewed: summaryItems.reduce((a, x) => a + (x.unreviewed ?? 0), 0),
+    pass: summaryItems.reduce((a, x) => a + (x.pass ?? 0), 0),
+    fail: summaryItems.reduce((a, x) => a + (x.fail ?? 0), 0),
+    distinct_skills: Math.max(...summaryItems.map((x) => x.distinct_skills ?? 0)),
+  };
+  // 各 row は host 横断で flat merge(skill_sha や verdict は global key)
+  const passRows = all.flatMap((r) => r.passRate?.rows ?? []);
+  const verdictRows = all.flatMap((r) => r.verdict?.rows ?? []);
+  const gamingRows = all.flatMap((r) => r.gaming?.rows ?? []);
+  const costRows = all.flatMap((r) => r.cost?.rows ?? []);
+  // 封筒メタは最初の取得分(複数 host あるので注記でその旨を出す)
+  const summaryEnv = all[0]?.summary ?? null;
+  const passRateEnv = all[0]?.passRate ?? null;
+  const verdictEnv = all[0]?.verdict ?? null;
+  const gamingEnv = all[0]?.gaming ?? null;
 
   // 取得した封筒のうち最も新しい注記をデータ源表示に使う(loop.db = 使い捨てインデックスの明示)。
-  const sourceNote =
+  const baseSource =
     summaryEnv?.source ??
     passRateEnv?.source ??
     "loop.db (derived index; authoritative=runs/*.md)";
+  const sourceNote = isFleet ? `${baseSource} / Fleet: ${all.length} host を合算` : baseSource;
   const generatedAt =
     summaryEnv?.generated_at ?? passRateEnv?.generated_at ?? null;
 

@@ -3,7 +3,9 @@
 import { useCallback, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import { SquarePen } from "lucide-react";
 
-import { api, ApiError, type JudgmentInput } from "@/lib/api";
+import { ApiError, type JudgmentInput } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
+import { useRunHost } from "@/lib/runHost";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -50,6 +52,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
   const [error, setError] = useState<string | null>(null);
   const [savedReviewed, setSavedReviewed] = useState(reviewed);
   const formRef = useRef<HTMLFormElement>(null);
+  const host = useRunHost();
 
   const save = useCallback(async () => {
     if (saving) return;
@@ -61,7 +64,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
         notes: state.notes ?? "",
         human_verdict: human,
       };
-      await api.putJudgment(runId, body);
+      await peerApi.submitJudgment(host, runId, body);
       setSavedReviewed(true);
       onSaved?.();
     } catch (e) {
@@ -70,7 +73,7 @@ export const JudgmentForm = forwardRef<JudgmentFormHandle, Props>(function Judgm
     } finally {
       setSaving(false);
     }
-  }, [saving, state, human, runId, onSaved]);
+  }, [saving, state, human, runId, onSaved, host]);
 
   useImperativeHandle(ref, () => ({ save }), [save]);
 
