@@ -266,7 +266,9 @@ def fields_from_fm(task_id: str, fm: dict, body: str) -> dict:
         "verify": fm.get("verify", "") or "",
         "constraints": fm.get("constraints") or [],
         "allowed_tools": tools or "",
-        "max_attempts": fm.get("max_attempts", "") if fm.get("max_attempts") is not None else "",
+        # YAML が `max_attempts: 1`(クォート無し)を int でパースして TaskFields(str) に渡すと
+        # pydantic v2 strict で 500 になる。境界で str 化する(空は空のまま)。
+        "max_attempts": "" if fm.get("max_attempts") is None else str(fm.get("max_attempts")),
         "status": fm.get("status", "todo"),
         "body": body,
     }
