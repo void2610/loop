@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import time
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse, Response
@@ -116,7 +118,6 @@ def run_pr(run_id: str = Depends(valid_run_id)):
 def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id)):
     """完了 run に人間の追加指示を投じて Implementer を resume + Verifier 監査まで走らせる。
     同じ run_id を保ち、stream に continuation marker を追記する。background 実行(SSE で進行を見る)。"""
-    import subprocess as _sp
     text = (inp.text or "").strip()
     if not text:
         raise HTTPException(400, err("bad_input", "text は必須です"))
@@ -153,7 +154,7 @@ def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
     runner._set_fm_key(md, "verdict", "running")
     runner.write_run_status(run_id=run_id, task=str(task_id), repo=str(repo),
                             phase="implementer", verdict=None)
-    _sp.Popen(["uv", "run", "runner.py", "continue", run_id, text], cwd=str(util.ROOT))
+    subprocess.Popen(["uv", "run", "runner.py", "continue", run_id, text], cwd=str(util.ROOT))
     return Response(status_code=202)
 
 
@@ -166,8 +167,6 @@ def stop_run(run_id: str = Depends(valid_run_id)):
     Zombie 検出(subprocess が落ちて verdict=running が残っているケース): runner.py プロセス
     が一切無く、stream の最新更新が一定時間より古い場合、API 自身で run.md / status / lock を
     `stopped` に確定して return する(stop マーカーを置いても誰も拾わないため)。"""
-    import time as _time
-
     rd = util.RUNS / run_id
     if not rd.is_dir():
         raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
@@ -188,7 +187,7 @@ def stop_run(run_id: str = Depends(valid_run_id)):
     stale_threshold = 120  # 2 分。claude の長 silent でも 2 分は通常 SessionStart 後に何か出る
     fresh = False
     candidates = [rd / "implementer.stream.jsonl", rd / "verifier.stream.jsonl"]
-    now = _time.time()
+    now = time.time()
     for p in candidates:
         if p.exists() and now - p.stat().st_mtime <= stale_threshold:
             fresh = True

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -56,9 +57,8 @@ def generate_task(inp: schemas.GenerateInput):
         args.append("--run")
     # 生成中ロックを即時に立てる(背景プロセスが lock を作るまでの race を避ける)。cmd_gen が完了で外す。
     runner.DATA.mkdir(parents=True, exist_ok=True)
-    import json as _json
     (runner.DATA / ".gen.lock").write_text(
-        _json.dumps({"gen_id": gen_id, "prompt": inp.prompt.strip()[:300]}), encoding="utf-8",
+        json.dumps({"gen_id": gen_id, "prompt": inp.prompt.strip()[:300]}), encoding="utf-8",
     )
     subprocess.Popen(args, cwd=str(util.ROOT))
     return schemas.GenerateAccepted(accepted=True, gen_id=gen_id)

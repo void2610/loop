@@ -7,7 +7,9 @@ _safe_id・evidence のパストラバーサル防御は移行後も緩めない
 from __future__ import annotations
 
 import json
+import os
 import re
+import sqlite3
 import sys
 import time
 from datetime import datetime
@@ -153,7 +155,6 @@ def known_repos() -> list[str]:
     cfg = runner.load_config()
     names = list((cfg.get("repos") or {}).keys())
     # 登録名 → 絶対パスの逆引き(run MD の repo フィールドは絶対パスで入る)
-    import os
     p2n: dict[str, str] = {}
     for n, v in (cfg.get("repos") or {}).items():
         path = v if isinstance(v, str) else (v.get("path") if isinstance(v, dict) else "")
@@ -172,7 +173,6 @@ def known_repos() -> list[str]:
 
 def _repo_last_used() -> dict[str, str]:
     """loop.db から repo(絶対パス)→ 最新 started_at(ISO 文字列)。"""
-    import sqlite3
     db_path = DATA / "loop.db"
     if not db_path.exists():
         return {}

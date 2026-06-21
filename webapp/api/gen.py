@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from .. import util
 from ..util import runner
@@ -94,8 +94,7 @@ def gen_stop(gen_id: str):
     if not d.exists():
         raise HTTPException(404, {"error": "not_found", "message": f"gen not found: {gen_id}"})
     (d / "stop").write_text("", encoding="utf-8")
-    from fastapi import Response as _R
-    return _R(status_code=204)
+    return Response(status_code=204)
 
 
 @router.get("/gen/{gen_id}/snapshot")

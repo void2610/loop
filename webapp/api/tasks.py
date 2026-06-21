@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 
@@ -18,20 +21,17 @@ router = APIRouter(tags=["tasks"])
 def _is_generating() -> bool:
     """`.gen.lock` の中の gen_id を見て stale 判定し、残骸なら unlink する。
     cmd_gen が SIGKILL されると finally の lock 解除が走らず残骸が残るため。"""
-    import json as _json
-    import time as _time
-
     lock = runner.DATA / ".gen.lock"
     if not lock.exists():
         return False
     try:
-        meta = _json.loads(lock.read_text(encoding="utf-8"))
+        meta = json.loads(lock.read_text(encoding="utf-8"))
         gen_id = meta.get("gen_id") if isinstance(meta, dict) else None
-    except (OSError, _json.JSONDecodeError, ValueError):
+    except (OSError, json.JSONDecodeError, ValueError):
         gen_id = None
     if not gen_id:
         # 旧形式の lock(prompt のみ)。mtime で stale 判定
-        if _time.time() - lock.stat().st_mtime > 60:
+        if time.time() - lock.stat().st_mtime > 60:
             try:
                 lock.unlink()
             except OSError:
@@ -48,7 +48,7 @@ def _is_generating() -> bool:
         return False
     # stream が一定時間更新なし = kill された残骸(Author の長考も拾わないよう 3 分)
     sp = gen_dir / "author.stream.jsonl"
-    silent = not sp.exists() or _time.time() - sp.stat().st_mtime > 180
+    silent = not sp.exists() or time.time() - sp.stat().st_mtime > 180
     if silent:
         try:
             lock.unlink()
