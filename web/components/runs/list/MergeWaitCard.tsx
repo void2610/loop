@@ -49,16 +49,25 @@ export function MergeWaitCard({ run, onMerged }: { run: RunRow; onMerged: () => 
 
   const ci = ciLabel(pr?.ci);
   const state = pr?.state ?? "…";
+  const host = (run as RunRow & { host?: string }).host;
+  const runHref = `/runs/${encodeURIComponent(run.run_id)}${host ? `?host=${encodeURIComponent(host)}` : ""}`;
+  // カード全面を run 詳細へのリンクにし、PR リンクは absolute Link の上に relative z-10 で重ねる
+  // (Next の Link は <a> なのでネスト不可 → 「フル面オーバーレイ + 兄弟リンク」パターン)。
   return (
-    <Card className="border-verdict-pass/40 bg-verdict-pass/5">
-      <CardHeader className="space-y-2 pb-3">
+    <Card className="relative border-verdict-pass/40 bg-verdict-pass/5 transition-colors hover:border-verdict-pass">
+      <Link
+        href={runHref}
+        aria-label={`run ${run.run_id} を開く`}
+        className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdict-pass"
+      />
+      <CardHeader className="relative z-10 pointer-events-none space-y-2 pb-3">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-base">{run.task ?? run.run_id}</CardTitle>
           <RepoBadge repo={run.repo} />
         </div>
         <p className="font-mono text-xs text-muted-foreground">{run.run_id}</p>
       </CardHeader>
-      <CardContent className="flex items-center justify-between gap-3 pt-0">
+      <CardContent className="relative z-10 pointer-events-none flex items-center justify-between gap-3 pt-0">
         <div className="flex items-center gap-2 text-xs">
           <Badge variant="outline">PR {pr?.number ? `#${pr.number}` : ""} · {state}</Badge>
           <span className={ci.cls}>{ci.text}</span>
@@ -68,7 +77,8 @@ export function MergeWaitCard({ run, onMerged }: { run: RunRow; onMerged: () => 
             href={pr.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+            onClick={(e) => e.stopPropagation()}
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
           >
             <ExternalLink className="size-3.5" />
             PR を開く
