@@ -199,6 +199,31 @@ def write_task(task_id: str, fm: dict, body: str = "") -> Path:
     return p
 
 
+# 続行時に Verifier が contract_update を出した場合に、許可フィールドだけ task front-matter に反映する。
+# 人間の権威指示と契約のズレを runner が決定論的に書き戻す(Verifier は read-only のまま提案だけ)。
+_CONTRACT_UPDATABLE_KEYS = ("goal", "accept", "verify", "constraints")
+
+
+def apply_contract_update(task_id: str, update: dict) -> dict | None:
+    """task md の YAML front-matter に contract_update を適用して新 task dict を返す。
+    None なら何も変更しなかった(無効な update / 未許可キーのみ等)。"""
+    if not isinstance(update, dict):
+        return None
+    sanitized = {k: update[k] for k in _CONTRACT_UPDATABLE_KEYS if k in update}
+    if not sanitized:
+        return None
+    res = read_task(task_id)
+    if res is None:
+        return None
+    fm, body = res
+    fm = dict(fm or {})
+    fm.update(sanitized)
+    write_task(task_id, fm, body)
+    new = dict(fm)
+    new["id"] = task_id
+    return new
+
+
 def goal_contract_sha(task: dict) -> str:
     """目標契約の正規化ハッシュ。skill_sha と並ぶ再現性のキー。"""
     canonical = {k: task.get(k) for k in ("goal", "accept", "constraints", "verify", "allowed_tools", "repo")}
@@ -289,7 +314,13 @@ def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: 
         f"## 決定論テストの出力\n{test_output[:4000]}",
     ]
     if human_input.strip():
-        parts.append(f"## 人間の介入(承認・決定)\n{human_input.strip()}")
+        parts.append(
+            f"## 人間の介入(承認・決定)\n{human_input.strip()}\n\n"
+            f"※ この介入が**契約(goal/accept/verify/constraints)と矛盾する**ときは、"
+            f"人間の指示が権威。`contract_update` フィールドに新しい契約値を出してください "
+            f"(例: `accept` を新しい配列で置き換える、`verify` コマンドを書き換える 等)。"
+            f"runner が決定論的に契約ファイルに適用してから再判定します。"
+            f"あなた自身はファイルを編集しないでください(read-only のまま提案だけ)。")
     if brief:
         parts.append(brief.lstrip("\n"))  # build_norms_brief / build_repo_brief は冒頭に見出し付き
     return "/loop-roles:verifier " + "\n\n".join(parts)
@@ -689,6 +720,18 @@ VERIFIER_SCHEMA = {
         "required_changes": {"type": "array", "items": {"type": "string"}},  # revise 時の修正指示
         "reasons": {"type": "string"},
         "confidence": {"enum": ["high", "medium", "low"]},
+        # 続行時のみ: 人間の追加指示が現契約と矛盾するとき、Verifier が「契約をこう書き換えるべき」
+        # を構造化で提案する。runner が決定論的に data/tasks/<id>.md の YAML front-matter に適用し、
+        # 同ラウンドで更新後の基準で再判定する(Verifier 自身は read-only のまま、提案だけ)。
+        "contract_update": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "accept": {"type": "array", "items": {"type": "string"}},
+                "verify": {"type": "string"},
+                "constraints": {"type": "array", "items": {"type": "string"}},
+            },
+        },
     },
     "required": ["verdict", "reasons", "confidence"],
 }
@@ -2314,22 +2357,7 @@ def cmd_continue(run_id: str, instructions: str) -> int:
             _existing = 0
         i_result, inbox_seen = None, _existing
         try:
-            # 続行指示が元 task の accept/verify と矛盾するときは、worktree だけでなく
-            # **task 契約ファイル** も人間の意図に合わせて書き換える権限を Implementer に与える
-            # (これがないと Verifier が元基準と矛盾したまま revise を繰り返して loop が回らない)。
-            task_md_path = TASKS_DIR / f"{task['id']}.md"
-            impl.send(
-                f"## 人間からの追加指示(続行 #{cont_count})\n{instructions}\n\n"
-                f"## 続行時の特例(契約更新)\n"
-                f"あなたは worktree(対象 repo)に加えて、loop の task 契約ファイル "
-                f"`{task_md_path}` も編集できます。\n"
-                f"人間の追加指示が現行 task の `accept` / `verify` / `constraints` / `goal` と"
-                f"矛盾する場合、worktree の実装を変えるだけでなく、**契約ファイル側の YAML "
-                f"front-matter を人間の意図に合わせて書き換えてください**(accept の文言、"
-                f"verify コマンド、constraints の禁止項目 等)。契約を更新しない限り Verifier は "
-                f"古い基準で判定して revise を繰り返し、人間の指示が反映されません。\n"
-                f"編集の方針: 人間の指示で **明示的に変わるもの**(例: 日本語パス→英字パス)を "
-                f"accept / verify に反映する。それ以外の元基準はそのまま残す。")
+            impl.send(f"## 人間からの追加指示(続行 #{cont_count})\n{instructions}")
             i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
             if i_hint == "timeout":
                 final, retryable = "timeout", True
@@ -2345,19 +2373,23 @@ def cmd_continue(run_id: str, instructions: str) -> int:
                 while True:
                     capture_diff(wt, run_dir)
                     write_run_status(run_id=run_id, phase="verifier")
-                    # 続行で Implementer が task 契約ファイルを書き換えた可能性があるので、
-                    # 各ラウンドの判定前に task 契約を読み直す(verify / accept / constraints が最新になる)。
-                    _res = read_task(task["id"])
-                    if _res is not None:
-                        _fm, _body = _res
-                        _new_task = dict(_fm or {})
-                        _new_task["id"] = task["id"]
-                        task = _new_task
                     test_verdict, vcode = run_verify(task, wt, run_dir)
                     diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
                     tp = run_dir / "test-output.txt"
                     test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
                     verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
+                    # Verifier が contract_update を出していれば、runner が決定論的に task 契約に適用し、
+                    # 更新後の基準で **同ラウンドで** 再判定する(read-only の Verifier に直接編集させない)。
+                    if isinstance(verifier_obj, dict) and verifier_obj.get("contract_update"):
+                        updated = apply_contract_update(task["id"], verifier_obj["contract_update"])
+                        if updated is not None:
+                            print(f"  · 契約更新を適用 → 再判定 (round {rounds + 1})")
+                            task = updated
+                            # 更新後の verify で test を回し直し、Verifier に再判定させる(同一ラウンド内)。
+                            test_verdict, vcode = run_verify(task, wt, run_dir)
+                            test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+                            verifier_verdict, verifier_obj = judge_with_verifier(
+                                task, wt, run_dir, cfg, diff_text, test_output, brief)
                     if verifier_obj is not None:
                         # 続行ラウンドごとに別名で残す(履歴の追跡)
                         (run_dir / f"verifier.cont{cont_count}.round{rounds + 1}.json").write_text(
