@@ -2303,7 +2303,16 @@ def cmd_continue(run_id: str, instructions: str) -> int:
         print(f"  · Implementer 続行(resume={prev_session[:8]}…)")
         impl = RoleSession("implementer", wt, cfg, run_dir, agents["implementer_model"], i_tools,
                            resume_session=prev_session, append_stream=True)
-        i_result, inbox_seen = None, 0
+        # 続行指示は Verifier 可視化のため inbox.jsonl に既に追記済(`render_verifier_prompt` の
+        # 「人間の介入」セクションに入る)。await_human はそれを「NEEDS_HUMAN への応答」として
+        # 取らないよう、開始時点の inbox 行数を消費済みとしてマークする(さもないと当初指示が
+        # ループバックして Implementer が「もう応答済み」と判定して仕事を止める)。
+        try:
+            _existing = sum(1 for line in (run_dir / "inbox.jsonl").read_text(
+                encoding="utf-8").splitlines() if line.strip())
+        except (OSError, UnicodeDecodeError):
+            _existing = 0
+        i_result, inbox_seen = None, _existing
         try:
             impl.send(f"## 人間からの追加指示(続行 #{cont_count})\n{instructions}")
             i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
