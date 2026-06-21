@@ -315,6 +315,56 @@ def test_stop_404_when_no_run_dir(isolated_data, client):
     assert client.post("/api/runs/s2/stop").status_code == 404
 
 
+def test_stop_writes_marker_without_md(isolated_data, client):
+    """run.md がまだ無い段階(run 開始直後)でも 500 にせず 204 + マーカー(回帰: md 不在クラッシュ)。"""
+    rd = isolated_data / "runs" / "s3"
+    rd.mkdir()
+    assert client.post("/api/runs/s3/stop").status_code == 204
+    assert (rd / "stop").exists()
+
+
+# --- continue: background 起動前の前提検証(202 で silent fail させない) ---
+
+def test_continue_404_when_no_run_dir(isolated_data, client):
+    assert client.post("/api/runs/c0/continue", json={"text": "続けて"}).status_code == 404
+
+
+def test_continue_404_when_no_md(isolated_data, client):
+    (isolated_data / "runs" / "c1").mkdir()
+    r = client.post("/api/runs/c1/continue", json={"text": "続けて"})
+    assert r.status_code == 404
+
+
+def test_continue_rejects_empty(isolated_data, client):
+    (isolated_data / "runs" / "c2").mkdir()
+    assert client.post("/api/runs/c2/continue", json={"text": "  "}).status_code == 400
+
+
+def test_continue_busy_409(isolated_data, client):
+    rd = isolated_data / "runs" / "c3"
+    rd.mkdir()
+    _write_run(isolated_data, "c3", front="task: t\nverdict: pass\n")
+    (isolated_data / ".run.lock").write_text("{}", encoding="utf-8")
+    r = client.post("/api/runs/c3/continue", json={"text": "続けて"})
+    assert r.status_code == 409 and r.json()["detail"]["error"] == "busy"
+
+
+def test_continue_bad_run_md_409_when_no_task(isolated_data, client):
+    rd = isolated_data / "runs" / "c4"
+    rd.mkdir()
+    _write_run(isolated_data, "c4", front="verdict: pass\n")  # task キー欠落
+    r = client.post("/api/runs/c4/continue", json={"text": "続けて"})
+    assert r.status_code == 409 and r.json()["detail"]["error"] == "bad_run_md"
+
+
+def test_continue_task_missing_409(isolated_data, client):
+    rd = isolated_data / "runs" / "c5"
+    rd.mkdir()
+    _write_run(isolated_data, "c5", front="task: ghost-task\nverdict: pass\n")
+    r = client.post("/api/runs/c5/continue", json={"text": "続けて"})
+    assert r.status_code == 409 and r.json()["detail"]["error"] == "task_missing"
+
+
 def test_pr_status_empty_without_pr_url(isolated_data, client):
     """pr_url の無い run は all-None を返す(gh を叩かない)。"""
     _write_run(isolated_data, "pr1", front="task: x\nverdict: pass\n")
