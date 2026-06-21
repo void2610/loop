@@ -24,9 +24,10 @@ import threading
 import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -1978,6 +1979,114 @@ def _drive_implementer(impl: "RoleSession", run_id: str, run_dir: Path, cfg: dic
         impl.send(human)
 
 
+@dataclass
+class VerifyLoopOutcome:
+    """_verify_revise_loop の出力。ループ内で更新される全状態を呼び出し側へ返す。"""
+    final: str
+    test_verdict: str
+    verifier_verdict: str
+    vcode: int | None
+    verifier_obj: dict | None
+    retryable: bool
+    stopped: bool
+    revise_occurred: bool
+    inbox_seen: int
+    i_result: dict | None
+    task: dict
+
+
+def _verify_revise_loop(task: dict, impl: "RoleSession", wt: Path, run_dir: Path, run_id: str,
+                        cfg: dict, brief: str, i_result: dict | None, inbox_seen: int, *,
+                        round_name_fn: Callable[[int], str],
+                        allow_contract_update: bool) -> VerifyLoopOutcome:
+    """実装完了後の有界ループ: 決定論ゲート(run_verify)→ Verifier 監査 →(欠陥なら revise を自動注入 /
+    revise 上限超過は await_human で人間へ)。_run_attempt(初回 run)と cmd_continue(続行)で共有する。
+
+    両者の差分はこの2点だけで、引数で表現する:
+    - allow_contract_update: continue のみ True(人間主導の契約編集を Verifier 提案経由で適用)。初回 run は False。
+    - round_name_fn(rounds): verifier_obj をラウンド別に残すファイル名(初回 run と続行で命名が異なる)。
+    """
+    loop = cfg["loop"]
+    verifier_obj = None
+    retryable = False
+    stopped = False
+    revise_occurred = False
+    test_verdict, verifier_verdict, vcode = "none", "handoff", None
+    final = "fail"
+    revise_max = int(loop.get("implementer_revise_rounds", 2))
+    rounds = 0
+    while True:
+        capture_diff(wt, run_dir)
+        write_run_status(run_id=run_id, phase="verifier")
+        test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"(床)
+        diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
+        tp = run_dir / "test-output.txt"
+        test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+        verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
+        # Verifier が contract_update を出していれば runner が決定論的に task 契約へ適用し、
+        # 更新後の基準で **同ラウンドで** 再判定する(read-only の Verifier に直接編集させない)。
+        if allow_contract_update and isinstance(verifier_obj, dict) and verifier_obj.get("contract_update"):
+            updated = apply_contract_update(task["id"], verifier_obj["contract_update"])
+            if updated is not None:
+                print(f"  · 契約更新を適用 → 再判定 (round {rounds + 1})")
+                task = updated
+                test_verdict, vcode = run_verify(task, wt, run_dir)
+                test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+                verifier_verdict, verifier_obj = judge_with_verifier(
+                    task, wt, run_dir, cfg, diff_text, test_output, brief)
+        if verifier_obj is not None:  # 各ラウンドの判断を証拠として残す(最終 verifier.json とは別)
+            (run_dir / round_name_fn(rounds)).write_text(
+                json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+        if verifier_verdict in ("pass", "fail"):
+            break
+        # 実装後の欠陥(revise・回数内): Verifier の指摘を自動で差し戻す(人間不要)
+        if verifier_verdict == "revise" and rounds < revise_max:
+            rounds += 1
+            revise_occurred = True
+            print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})→ Implementer 再実装 …")
+            write_run_status(run_id=run_id, phase="implementer")
+            impl.send(render_revise_prompt(task, verifier_obj))
+            i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
+            if i_hint in ("timeout", "error"):
+                final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+                break
+            if i_hint == "handoff":
+                verifier_verdict = "handoff"
+                break
+            if i_hint == "stopped":
+                final, stopped = "stopped", True
+                break
+            continue
+        # 最後の安全網: revise 上限超過 / Verifier handoff → 人間へ(主経路ではない)
+        question = ((verifier_obj or {}).get("reasons")
+                    or "自動判定では確証できません。続行指示をください。")
+        human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
+        if human == STOP_SIGNAL:
+            final, stopped = "stopped", True
+            break
+        if human is None:
+            verifier_verdict = "handoff"
+            break
+        print("  · 人間の続行指示を受領 → Implementer 続行 …")
+        write_run_status(run_id=run_id, phase="implementer")
+        impl.send(human)
+        i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
+        if i_hint in ("timeout", "error"):
+            final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+            break
+        if i_hint == "handoff":
+            verifier_verdict = "handoff"
+            break
+        if i_hint == "stopped":
+            final, stopped = "stopped", True
+            break
+        rounds = 0  # 人間が方向を与えた = 新フェーズ。revise カウンタをリセット
+    if not retryable and not stopped:
+        final = combine_verdict(test_verdict, verifier_verdict)
+    return VerifyLoopOutcome(final, test_verdict, verifier_verdict, vcode, verifier_obj,
+                             retryable, stopped, revise_occurred, inbox_seen, i_result, task)
+
+
 # --- コマンド ---
 
 def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[str, bool]:
@@ -2064,65 +2173,16 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                 final, stopped = "stopped", True
             else:
                 # 3-5) 実装完了 → 決定論ゲート → Verifier 監査 →(欠陥なら revise を自動注入)を有界ループ。
-                revise_max = int(loop.get("implementer_revise_rounds", 2))
-                rounds = 0
-                while True:
-                    capture_diff(wt, run_dir)
-                    write_run_status(run_id=run_id, phase="verifier")
-                    test_verdict, vcode = run_verify(task, wt, run_dir)   # "pass"/"fail"/"none"(床)
-                    diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
-                    tp = run_dir / "test-output.txt"
-                    test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
-                    verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
-                    if verifier_obj is not None:  # 各ラウンドの判断を証拠として残す(最終 verifier.json とは別)
-                        (run_dir / f"verifier.round{rounds + 1}.json").write_text(
-                            json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-                    if verifier_verdict in ("pass", "fail"):
-                        break
-                    # 実装後の欠陥(revise・回数内): Verifier の指摘を自動で差し戻す(人間不要)
-                    if verifier_verdict == "revise" and rounds < revise_max:
-                        rounds += 1
-                        revise_occurred = True
-                        print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})→ Implementer 再実装 …")
-                        write_run_status(run_id=run_id, phase="implementer")
-                        impl.send(render_revise_prompt(task, verifier_obj))
-                        i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
-                        if i_hint in ("timeout", "error"):
-                            final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
-                            break
-                        if i_hint == "handoff":
-                            verifier_verdict = "handoff"
-                            break
-                        if i_hint == "stopped":
-                            final, stopped = "stopped", True
-                            break
-                        continue
-                    # 最後の安全網: revise 上限超過 / Verifier handoff → 人間へ(主経路ではない)
-                    question = ((verifier_obj or {}).get("reasons")
-                                or "自動判定では確証できません。続行指示をください。")
-                    human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
-                    if human == STOP_SIGNAL:
-                        final, stopped = "stopped", True
-                        break
-                    if human is None:
-                        verifier_verdict = "handoff"
-                        break
-                    print("  · 人間の続行指示を受領 → Implementer 続行 …")
-                    write_run_status(run_id=run_id, phase="implementer")
-                    impl.send(human)
-                    i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
-                    if i_hint in ("timeout", "error"):
-                        final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
-                        break
-                    if i_hint == "handoff":
-                        verifier_verdict = "handoff"
-                        break
-                    if i_hint == "stopped":
-                        final, stopped = "stopped", True
-                        break
-                    rounds = 0  # 人間が方向を与えた = 新フェーズ。revise カウンタをリセット
-                if not retryable and not stopped:
-                    final = combine_verdict(test_verdict, verifier_verdict)
+                #     初回 run は契約編集を許さず(allow_contract_update=False)、verifier.round<N>.json で残す。
+                out = _verify_revise_loop(
+                    task, impl, wt, run_dir, run_id, cfg, brief, i_result, inbox_seen,
+                    round_name_fn=lambda r: f"verifier.round{r + 1}.json",
+                    allow_contract_update=False)
+                final, test_verdict, verifier_verdict, vcode = (
+                    out.final, out.test_verdict, out.verifier_verdict, out.vcode)
+                verifier_obj, retryable, stopped, revise_occurred = (
+                    out.verifier_obj, out.retryable, out.stopped, out.revise_occurred)
+                inbox_seen, i_result, task = out.inbox_seen, out.i_result, out.task
         finally:
             impl.close()
         session_id = (i_result or {}).get("session_id")
@@ -2334,76 +2394,16 @@ def cmd_continue(run_id: str, instructions: str) -> int:
             elif i_hint == "stopped":
                 final, stopped = "stopped", True
             else:
-                revise_max = int(loop.get("implementer_revise_rounds", 2))
-                rounds = 0
-                while True:
-                    capture_diff(wt, run_dir)
-                    write_run_status(run_id=run_id, phase="verifier")
-                    test_verdict, vcode = run_verify(task, wt, run_dir)
-                    diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
-                    tp = run_dir / "test-output.txt"
-                    test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
-                    verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
-                    # Verifier が contract_update を出していれば、runner が決定論的に task 契約に適用し、
-                    # 更新後の基準で **同ラウンドで** 再判定する(read-only の Verifier に直接編集させない)。
-                    if isinstance(verifier_obj, dict) and verifier_obj.get("contract_update"):
-                        updated = apply_contract_update(task["id"], verifier_obj["contract_update"])
-                        if updated is not None:
-                            print(f"  · 契約更新を適用 → 再判定 (round {rounds + 1})")
-                            task = updated
-                            # 更新後の verify で test を回し直し、Verifier に再判定させる(同一ラウンド内)。
-                            test_verdict, vcode = run_verify(task, wt, run_dir)
-                            test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
-                            verifier_verdict, verifier_obj = judge_with_verifier(
-                                task, wt, run_dir, cfg, diff_text, test_output, brief)
-                    if verifier_obj is not None:
-                        # 続行ラウンドごとに別名で残す(履歴の追跡)
-                        (run_dir / f"verifier.cont{cont_count}.round{rounds + 1}.json").write_text(
-                            json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-                    if verifier_verdict in ("pass", "fail"):
-                        break
-                    if verifier_verdict == "revise" and rounds < revise_max:
-                        rounds += 1
-                        revise_occurred = True
-                        print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})")
-                        write_run_status(run_id=run_id, phase="implementer")
-                        impl.send(render_revise_prompt(task, verifier_obj))
-                        i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
-                        if i_hint in ("timeout", "error"):
-                            final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
-                            break
-                        if i_hint == "handoff":
-                            verifier_verdict = "handoff"
-                            break
-                        if i_hint == "stopped":
-                            final, stopped = "stopped", True
-                            break
-                        continue
-                    question = ((verifier_obj or {}).get("reasons")
-                                or "自動判定では確証できません。続行指示をください。")
-                    human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
-                    if human == STOP_SIGNAL:
-                        final, stopped = "stopped", True
-                        break
-                    if human is None:
-                        verifier_verdict = "handoff"
-                        break
-                    print("  · 人間の続行指示を受領 → Implementer 続行 …")
-                    write_run_status(run_id=run_id, phase="implementer")
-                    impl.send(human)
-                    i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
-                    if i_hint in ("timeout", "error"):
-                        final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
-                        break
-                    if i_hint == "handoff":
-                        verifier_verdict = "handoff"
-                        break
-                    if i_hint == "stopped":
-                        final, stopped = "stopped", True
-                        break
-                    rounds = 0
-                if not retryable and not stopped:
-                    final = combine_verdict(test_verdict, verifier_verdict)
+                # 続行は契約編集を許す(allow_contract_update=True)。verifier.cont<N>.round<M>.json で履歴を残す。
+                out = _verify_revise_loop(
+                    task, impl, wt, run_dir, run_id, cfg, brief, i_result, inbox_seen,
+                    round_name_fn=lambda r: f"verifier.cont{cont_count}.round{r + 1}.json",
+                    allow_contract_update=True)
+                final, test_verdict, verifier_verdict, vcode = (
+                    out.final, out.test_verdict, out.verifier_verdict, out.vcode)
+                verifier_obj, retryable, stopped, revise_occurred = (
+                    out.verifier_obj, out.retryable, out.stopped, out.revise_occurred)
+                inbox_seen, i_result, task = out.inbox_seen, out.i_result, out.task
         finally:
             impl.close()
 

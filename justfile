@@ -5,10 +5,11 @@
 run:
     uv run runner.py run
 
-# バックエンドの契約テスト(API 契約 + loop.db 不変条件)。リファクタの安全網。
+# バックエンドの契約テスト(API 契約 + loop.db 不変条件 + run ループ全経路)。リファクタの安全網。
 test:
     uv run tests/test_api_contract.py
     uv run tests/test_loopdb.py
+    uv run tests/test_verify_loop.py
 
 # バックエンド(FastAPI: /api + SSE)のみ起動。:8765
 web:
