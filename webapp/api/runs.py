@@ -167,9 +167,48 @@ def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
              openapi_extra={"x-loop-kind": "A(中継)"})
 def stop_run(run_id: str = Depends(valid_run_id)):
     """実行中/awaiting の run に停止マーカーを置く。runner が検知し `stopped` で正常終了
-    (ロック解放・worktree 後始末・記録を残す)。awaiting は即時、実行中はターン境界で停止。"""
+    (ロック解放・worktree 後始末・記録を残す)。awaiting は即時、実行中はターン境界で停止。
+
+    Zombie 検出(subprocess が落ちて verdict=running が残っているケース): runner.py プロセス
+    が一切無く、stream の最新更新が一定時間より古い場合、API 自身で run.md / status / lock を
+    `stopped` に確定して return する(stop マーカーを置いても誰も拾わないため)。"""
+    import time as _time
+
     rd = util.RUNS / run_id
     if not rd.is_dir():
         raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
     (rd / "stop").write_text("", encoding="utf-8")
+
+    # 既に done なら何もしない(stop マーカーだけ残しても害は無いので置いたまま)。
+    md = util.RUNS / f"{run_id}.md"
+    if md.exists() and util._md_verdict_is_final(md):
+        return Response(status_code=204)
+
+    # zombie 判定: stream(役の subprocess が直接書く)が一定時間更新されていなければ
+    # subprocess は死んでいる。status.json は POST /continue API 自身が書くため判定に使えない
+    # (POST 直後に stop を押すと常に「fresh」に見えてしまう)。
+    stale_threshold = 120  # 2 分。claude の長 silent でも 2 分は通常 SessionStart 後に何か出る
+    fresh = False
+    candidates = [rd / "implementer.stream.jsonl", rd / "verifier.stream.jsonl"]
+    now = _time.time()
+    for p in candidates:
+        if p.exists() and now - p.stat().st_mtime <= stale_threshold:
+            fresh = True
+            break
+    if fresh:
+        return Response(status_code=204)
+
+    # zombie 確定。verdict=stopped に確定 + status.json done + .run.lock 解放。
+    runner._set_fm_key(md, "verdict", "stopped")
+    sp = rd / "status.json"
+    try:
+        sp.write_text(json.dumps(
+            {"run_id": run_id, "phase": "done", "verdict": "stopped"}, ensure_ascii=False),
+            encoding="utf-8")
+    except OSError:
+        pass
+    try:
+        (runner.DATA / ".run.lock").unlink(missing_ok=True)
+    except OSError:
+        pass
     return Response(status_code=204)
