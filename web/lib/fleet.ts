@@ -126,11 +126,17 @@ async function peerFetchJson<T>(
     }
     throw new ApiError(res.status, detail);
   }
-  // 202 Accepted / 204 No Content は body 空 → json.parse 失敗を避けるため未定義返し。
-  if (res.status === 204 || res.status === 202) return undefined as T;
-  // Content-Length: 0 の 200 も同様に未定義扱い(parse 例外を「送信失敗」と誤表示しない)。
-  if (res.headers.get("content-length") === "0") return undefined as T;
-  return (await res.json()) as T;
+  // 204 No Content は body 空。
+  if (res.status === 204) return undefined as T;
+  // peer プロキシは content-length を剥がす(streaming 対応の副作用)ため、text() 経由で
+  // 安全に取り出す。空 body や非 JSON でも throw せず undefined 扱い。
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return undefined as T;
+  }
 }
 
 /** peer 経由で生テキスト(証拠ファイル本文等)を取る。404 等は ApiError。 */
