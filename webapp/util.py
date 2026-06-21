@@ -320,13 +320,8 @@ def active_runs() -> list[dict]:
                          default=sp.stat().st_mtime)
         except OSError:
             newest = 0
-        # MD が一度も書かれていない = run が成立せず subprocess が死亡したパターン。
-        # この場合は短い閾値(30秒)で残骸判定する(stale_after の 1.5h は完了 run の長尺待機用)。
-        threshold = stale_after if md.exists() else 30
-        if now - newest > threshold:
+        if now - newest > stale_after:
             continue
-        # subprocess が居なくなった = 親プロセスが死んだ後の残骸。生きた pid が status.json に
-        # 紐づかないため判定が難しいが、上記 2 条件(MD 完了 / 無更新 stale)でほぼ拾える。
         out.append(_add_elapsed(d))
     out.sort(key=lambda r: str(r.get("started_at") or ""))
     return out
