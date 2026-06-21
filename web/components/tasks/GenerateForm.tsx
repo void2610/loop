@@ -7,13 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { getFleetInfo, peerApi, type FleetInfo } from "@/lib/fleet";
 
 // プロンプト → 目標契約の生成(202 非ブロッキング)。
 // 生成役は runner 側で read-only 強制。GUI/BFF は LLM を呼ばず prompt を中継するだけ。
 // repo は必須(推定しない)。auto_run は生成後の即時実行トグル。
-export function GenerateForm({ repos }: { repos: string[] }) {
+// Fleet: host セレクタで生成先 PC を選び、その peer の Author に作らせる(repos / branches も該当 host から取る)。
+export function GenerateForm() {
   const router = useRouter();
+  const [fleetInfo, setFleetInfo] = useState<FleetInfo | null>(null);
+  const [host, setHost] = useState("");
+  const [repos, setRepos] = useState<string[]>([]);
   const [prompt, setPrompt] = useState("");
   const [repo, setRepo] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
@@ -23,20 +28,49 @@ export function GenerateForm({ repos }: { repos: string[] }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 'none' は専用選択肢として最後に出すので一覧からは除外する(legacy todo_new.html 踏襲)。
+  // 初回: fleetInfo を取り、host を self に初期化。
+  useEffect(() => {
+    void getFleetInfo()
+      .then((f) => {
+        setFleetInfo(f);
+        setHost(f.self_name ?? f.peers[0]?.name ?? "");
+      })
+      .catch(() => setFleetInfo({ self_name: null, peers: [] }));
+  }, []);
+
+  // host 変更時: その peer の repos を取得(repo セレクションはリセット)。
+  useEffect(() => {
+    if (!host) return;
+    let live = true;
+    peerApi
+      .listRepos(host)
+      .then((r) => {
+        if (!live) return;
+        setRepos(r.repos);
+        setRepo("");
+        setBaseBranch("");
+        setBranches([]);
+      })
+      .catch(() => live && setRepos([]));
+    return () => {
+      live = false;
+    };
+  }, [host]);
+
+  // 'none' は専用選択肢として最後に出すので一覧からは除外する。
   const registered = repos.filter((r) => r.toLowerCase() !== "none");
 
   // 選択 repo のブランチ候補を取得(base_branch の datalist 用)。none/未選択は空。
-  // baseBranch が空なら API が返す default で初期化(repo を変えるたびに上書き)。
+  // baseBranch は API が返す default で初期化(repo を変えるたびに上書き)。
   useEffect(() => {
-    if (!repo || repo.toLowerCase() === "none") {
+    if (!host || !repo || repo.toLowerCase() === "none") {
       setBranches([]);
       setBaseBranch("");
       return;
     }
     let live = true;
-    api
-      .repoBranches(repo)
+    peerApi
+      .repoBranches(host, repo)
       .then((r) => {
         if (!live) return;
         setBranches(r.branches);
@@ -46,11 +80,15 @@ export function GenerateForm({ repos }: { repos: string[] }) {
     return () => {
       live = false;
     };
-  }, [repo]);
+  }, [host, repo]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!host) {
+      setError("生成する host を選択してください");
+      return;
+    }
     if (!repo) {
       setError("対象リポジトリを選択してください(推定はしません)");
       return;
@@ -61,7 +99,13 @@ export function GenerateForm({ repos }: { repos: string[] }) {
     }
     setSubmitting(true);
     try {
-      await api.generate({ prompt, repo, base_branch: baseBranch, no_pr: noPr, auto_run: autoRun });
+      await peerApi.generate(host, {
+        prompt,
+        repo,
+        base_branch: baseBranch,
+        no_pr: noPr,
+        auto_run: autoRun,
+      });
       // 一覧へ遷移し「生成中」を可視化(TaskList が generating=1 でポーリング表示)。
       const q = autoRun ? "generating=1&autorun=1" : "generating=1";
       router.push(`/tasks?${q}`);
@@ -71,6 +115,10 @@ export function GenerateForm({ repos }: { repos: string[] }) {
     }
   }
 
+  if (!fleetInfo) {
+    return <p className="text-sm text-muted-foreground">読み込み中…</p>;
+  }
+
   return (
     <form onSubmit={onSubmit} className="max-w-3xl space-y-5">
       {error && (
@@ -78,6 +126,23 @@ export function GenerateForm({ repos }: { repos: string[] }) {
           {error}
         </p>
       )}
+
+      <div className="space-y-1.5">
+        <Label htmlFor="gen-host">生成する host</Label>
+        <select
+          id="gen-host"
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+          required
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          {fleetInfo.peers.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="gen-repo">

@@ -8,9 +8,12 @@
  */
 import {
   ApiError,
+  type BranchesResponse,
   type EvidenceMeta,
+  type GenerateInput,
   type JudgmentInput,
   type LiveSnapshot,
+  type ReposResponse,
   type RunDetail,
   type RunListResponse,
   type RunRow,
@@ -223,6 +226,18 @@ export const peerApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  // タスク生成(プロンプト→目標契約)。host 指定でその peer の Author に作らせる。
+  generate: (host: string | undefined, body: GenerateInput) =>
+    peerFetchJson<{ accepted: boolean }>(host, `/tasks/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  // repo メタ
+  listRepos: (host: string | undefined) =>
+    peerFetchJson<ReposResponse>(host, `/repos`),
+  repoBranches: (host: string | undefined, repo: string) =>
+    peerFetchJson<BranchesResponse>(host, `/repos/branches?repo=${encodeURIComponent(repo)}`),
 };
 
 /** Fleet 用に host を持たせた TaskRow(merge view で「どの PC のタスクか」を出す)。 */
