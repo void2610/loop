@@ -150,16 +150,31 @@ export function TaskList() {
         </div>
       ) : null}
 
-      {gens.length > 0 ? (
+      {(() => {
+        // 30 分超で完了した生成は出さない(実行中・直近のみ残す)。
+        // gen_id の prefix `YYYY-MM-DD-HHMMSS` を時刻として読む(信頼できる唯一の時刻情報)。
+        const cutoff = Date.now() - 30 * 60 * 1000;
+        const _re = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})/;
+        const recentGens = gens.filter((g) => {
+          if (g.status === "running") return true;
+          const m = _re.exec(g.gen_id);
+          if (!m) return true;
+          const t = new Date(
+            Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+            Number(m[4]), Number(m[5]), Number(m[6]),
+          ).getTime();
+          return t >= cutoff;
+        });
+        return recentGens.length > 0 ? (
         <div className="space-y-2">
           <p className="th-label">
-            最近の生成試行
+            最近の生成試行(直近 30 分・実行中)
             <span className="ml-2 font-normal tabular-nums text-muted-foreground">
-              {gens.length}
+              {recentGens.length}
             </span>
           </p>
           <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
-            {gens.map((g) => {
+            {recentGens.map((g) => {
               const color =
                 g.status === "ok"
                   ? "text-verdict-pass"
@@ -203,7 +218,8 @@ export function TaskList() {
             })}
           </ul>
         </div>
-      ) : null}
+      ) : null;
+      })()}
 
       <div className="flex justify-end">
         <ArchiveToggle checked={includeArchived} onChange={setIncludeArchived} />
