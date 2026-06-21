@@ -2114,7 +2114,7 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
         #    task.no_pr=true は PR を出さず loop/<id> ブランチのまま留める(ローカル検証用)。
         promote_info = None
         no_pr = str(task.get("no_pr", "")).lower() in ("true", "1", "yes")
-        if final == "pass" and loop.get("promote_on_pass") and committed and not no_pr:
+        if final == "pass" and committed and not no_pr:
             write_run_status(run_id=run_id, phase="promote")
             print("  · promote: PR 提出 → CI/Copilot 対応 …")
             promote_info = promote_run(task, run_id, run_dir, repo, wt, branch, cfg, session_id)

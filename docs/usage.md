@@ -116,7 +116,7 @@ merge view で表示する。到達できなかった peer は一覧上部に「
 1. **タスクを作る**: `/tasks/new` で依頼を書き repo を選ぶ → 生成。または `/tasks/<id>` / 手動フォームで直接書く。
 2. **実行する**: 一覧/編集の「実行」、`just run`(次の todo)、または WatchPaths(`data/tasks/` 変更)。
 3. **監視する**: `/runs` の実行中行 → `/runs/<id>/live` でライブ transcript。
-4. **(任意)promote**: `promote_on_pass=true` なら pass の成果が自動で PR 化され、CI+Copilot が green まで回る(merge は人間)。
+4. **promote**: pass の成果は自動で PR 化され、CI+Copilot が green まで回る(merge は人間)。個別タスクで PR を出したくないときは task に `no_pr: true` を付ける。
 5. **レビューする(種類B)**: `/runs/<id>` の判断フォーム(Web)。信用できるか・失敗の形・
    次に自動検証へ入れるべきチェックを書く → `review-notes.md` に蓄積。runner の verdict を覆すときは
    フォームの「verdict を覆す」select(or run MD front-matter の `human_verdict: <verdict>`)で選ぶ

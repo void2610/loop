@@ -20,7 +20,7 @@ repo 解決(task.repo)→ git worktree 隔離(repo は常に在る前提)
 final = combine(test_verdict, verifier_verdict)
   ↓
 worktree 内コミット(loop/<run_id> ブランチに成果)
-  ↓ [final=pass かつ promote_on_pass なら] promote 段(下記)
+  ↓ [final=pass かつ task.no_pr が false なら] promote 段(下記)
 runs/<id>.md 生成 → status 更新 → SQLite upsert → data repo へ auto-commit → worktree 後始末 → .run.lock 解放
 ```
 
@@ -132,7 +132,7 @@ human_verdict(人間が verdict を覆したとき)
 
 ## promote 段(PR 提出 → CI + Copilot が green まで)
 
-`loop.toml [loop] promote_on_pass = true`(既定 false)のとき、**final=pass の成果を PR 化**して外部の自動レビューに通す。
+**final=pass の成果は自動で PR 化**して外部の自動レビューに通す(個別タスクで PR を出したくないときは task に `no_pr: true` を付ける)。
 あなたの「ローカル完了 → PR 提出 → Copilot レビュー → 指摘修正 → PR 更新」を headless 化したもの。
 
 ```

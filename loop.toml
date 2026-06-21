@@ -29,8 +29,7 @@ intervention_timeout_seconds = 1800
 
 # promote: run=pass の成果を PR 化し、GitHub CI + Copilot レビューが green になるまで
 # Implementer を --resume で差し戻して回す(種類A)。merge は人間(自動 merge しない)。
-# 既定 false(安全)。有効化すると pass のたびに実 PR を作る外向き動作になる。
-promote_on_pass = false
+# 個別タスクで PR を出したくないときは task の front-matter に no_pr: true を付ける。
 promote_rounds = 3            # CI/Copilot 差し戻しの往復上限。超過は green にせず handoff
 ci_timeout_seconds = 1800     # CI チェック完了待ちのタイムアウト
 copilot_timeout_seconds = 600 # Copilot レビュー投稿待ちのタイムアウト

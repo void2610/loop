@@ -16,7 +16,6 @@ permission_mode = "default"
 max_concurrency = 1                  # 同時 run 本数(1=従来の直列)
 
 # promote(run=pass を PR 化し CI+Copilot が green まで自動修正)。既定 false。merge は人間。
-promote_on_pass = false
 promote_rounds = 3                   # CI/Copilot 差し戻しの往復上限(超過は handoff)
 ci_timeout_seconds = 1800            # CI 完了待ちタイムアウト
 copilot_timeout_seconds = 600        # Copilot レビュー投稿待ちタイムアウト
