@@ -59,6 +59,7 @@ _SSE_PATTERNS = (
     re.compile(r"^/api/stream/"),
     re.compile(r"^/api/runs/[^/]+/stream/?$"),
     re.compile(r"^/api/runs/[^/]+/live/?$"),
+    re.compile(r"^/api/gen/[^/]+/stream/?$"),
 )
 
 # 監視だけのモバイル運用(§7.6a)で値を合成しない: SSE token の既定寿命

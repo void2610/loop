@@ -88,3 +88,28 @@ export function subscribeRun(
   if (handlers.error) es.addEventListener("error", handlers.error);
   return () => es.close();
 }
+
+// --- タスク生成(Author)ストリーム ---
+export type GenEventData = TranscriptEvent & { role?: string };
+export type GenResult = { status: "ok" | "fail"; task_id?: string | null; error?: string | null };
+export type GenEndData = { gen_id: string; result: GenResult };
+
+export type GenStreamHandlers = {
+  event?: (d: GenEventData) => void;
+  end?: (d: GenEndData) => void;
+  error?: (e: Event) => void;
+};
+
+/** タスク生成(Author)のライブ transcript SSE を購読。peerBase 指定で他 host を購読。 */
+export function subscribeGen(
+  genId: string,
+  handlers: GenStreamHandlers,
+  token?: string,
+  peerBase?: string,
+): () => void {
+  const es = new EventSource(sseUrl(`/gen/${encodeURIComponent(genId)}/stream`, token, peerBase));
+  on(es, "event", handlers.event);
+  on(es, "end", handlers.end);
+  if (handlers.error) es.addEventListener("error", handlers.error);
+  return () => es.close();
+}

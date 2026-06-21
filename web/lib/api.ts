@@ -34,6 +34,7 @@ export type TaskDetail = Schemas["TaskDetail"];
 export type TaskInput = Schemas["TaskInput"];
 export type JudgmentInput = Schemas["JudgmentInput"];
 export type GenerateInput = Schemas["GenerateInput"];
+export type GenerateAccepted = Schemas["GenerateAccepted"];
 export type ReposResponse = Schemas["ReposResponse"];
 export type BranchesResponse = Schemas["BranchesResponse"];
 export type QueueItem = Schemas["QueueItem"];
@@ -187,7 +188,7 @@ export const api = {
     request<RunStartResult>("POST", `/tasks/${encodeURIComponent(taskId)}/run`, { body: {} }),
 
   generate: (body: GenerateInput) =>
-    request<{ accepted: boolean }>("POST", "/tasks/generate", { body }),
+    request<GenerateAccepted>("POST", "/tasks/generate", { body }),
 
   dispatch: () => request<RunStartResult>("POST", "/dispatch", { body: {} }),
 

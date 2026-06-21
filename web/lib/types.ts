@@ -72,6 +72,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/gen/{gen_id}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gen Snapshot
+         * @description 完了/失敗の結果(gen.json)と既蓄積の transcript event 配列。SSE 接続前の初期化用。
+         */
+        get: operations["gen_snapshot_api_gen__gen_id__snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gen/{gen_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Gen
+         * @description Author のライブ transcript SSE。author.stream.jsonl を tail して event/end を配信。
+         */
+        get: operations["stream_gen_api_gen__gen_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/meta": {
         parameters: {
             query?: never;
@@ -717,6 +757,13 @@ export interface components {
             /** Rows */
             rows: components["schemas"]["GamingSuspectRow"][];
         };
+        /** GenerateAccepted */
+        GenerateAccepted: {
+            /** Accepted */
+            accepted: boolean;
+            /** Gen Id */
+            gen_id: string;
+        };
         /** GenerateInput */
         GenerateInput: {
             /**
@@ -1319,7 +1366,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["GenerateAccepted"];
                 };
             };
             /** @description Validation Error */
@@ -1369,6 +1416,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FleetInfo"];
+                };
+            };
+        };
+    };
+    gen_snapshot_api_gen__gen_id__snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gen_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_gen_api_gen__gen_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gen_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

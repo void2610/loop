@@ -757,6 +757,80 @@ TASK_GEN_SCHEMA = {
 }
 
 
+def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
+                         gen_dir: Path) -> tuple[dict | None, str | None]:
+    """Author を stream-json で実行し、event を gen_dir/author.stream.jsonl にライブ追記。
+    返り値: (structured_output dict, None) 成功 / (None, error_reason) 失敗。
+    UI が SSE で transcript を tail し、result.json を見て完了を判定する。"""
+    agents, loop = cfg["agents"], cfg["loop"]
+    model = agents.get("author_model") or agents["implementer_model"]
+    inspect = repo_path is not None and repo_path.is_dir()
+    parts = [f"## 依頼\n{prompt}"]
+    if inspect:
+        parts.insert(0, f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。")
+        brief = build_constitution_brief() + build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
+        if brief.strip():
+            parts.append(brief.lstrip("\n"))
+    wrapped = "/loop-roles:task-author " + "\n\n".join(parts)
+    cmd = [
+        "claude", "-p", wrapped,
+        "--output-format", "stream-json", "--verbose",
+        "--model", model,
+        "--max-turns", "30" if inspect else "8",
+        "--max-budget-usd", str(loop["max_budget_usd"]),
+        "--permission-mode", loop.get("permission_mode", "default"),
+        "--allowedTools", "Read", "Grep", "Glob",
+        "--disallowedTools", *WRITE_TOOLS,
+        "--json-schema", json.dumps(TASK_GEN_SCHEMA, ensure_ascii=False),
+        "--plugin-dir", str(ROOT / ".claude" / "plugins" / "loop-roles"),
+    ]
+    cwd = str(repo_path) if inspect else str(ROOT)
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    sf = (gen_dir / "author.stream.jsonl").open("w", encoding="utf-8")
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1)
+    killed = {"v": False}
+
+    def _kill() -> None:
+        killed["v"] = True
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    timer = threading.Timer(loop["timeout_seconds"], _kill)
+    timer.start()
+    last_result: dict | None = None
+    try:
+        for line in proc.stdout:  # 各イベントが来た瞬間にファイルへ flush(UI が tail)
+            sf.write(line)
+            sf.flush()
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(ev, dict) and ev.get("type") == "result":
+                last_result = ev
+    finally:
+        timer.cancel()
+        proc.wait()
+        try:
+            stderr_text = proc.stderr.read() if proc.stderr else ""
+            if stderr_text:
+                (gen_dir / "author.stderr.log").write_text(stderr_text, encoding="utf-8")
+        except OSError:
+            pass
+        sf.close()
+    if killed["v"]:
+        return None, "timeout"
+    if last_result is None:
+        return None, "no_result"
+    obj = last_result.get("structured_output")
+    if not isinstance(obj, dict):
+        return None, f"no_structured_output(stop_reason={last_result.get('stop_reason')!r})"
+    return obj, None
+
+
 def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict | None:
     """自然言語の依頼を専用 skill 付きで claude -p に渡し、目標契約を構造化出力で得る。
     ファイルへの書き込みは行わない(backend が write_task で決定論的に書く)。
@@ -814,29 +888,47 @@ def _safe_task_id(raw: str) -> str:
     return s or "task"
 
 
+def new_gen_id() -> str:
+    """gen 用 ID(timestamp ベース)。runs と同じ命名規約を踏襲。"""
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m-%d-%H%M%S-gen")
+
+
+def gen_dir_for(gen_id: str) -> Path:
+    return DATA / "gen" / gen_id
+
+
 def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
-           base_branch: str | None = None, no_pr: bool = False) -> int:
+           base_branch: str | None = None, no_pr: bool = False,
+           gen_id: str | None = None) -> int:
     """自然言語の依頼からタスクを生成して data/tasks/ に書き、必要なら実行(background 想定)。
     repo を明示指定したら(空/None 以外)モデル推定を上書きする('default' は repo 省略=デフォルト)。
     base_branch 指定時は起点ブランチとして契約に書く(空=現在の HEAD 起点)。
-    no_pr=True は promote(PR 提出)を抑止するフラグを契約に書く(ローカル検証用)。"""
+    no_pr=True は promote(PR 提出)を抑止するフラグを契約に書く(ローカル検証用)。
+    gen_id 指定時はその ID の gen ディレクトリ(data/gen/<id>/)に Author の transcript を保存し、
+    完了/失敗を gen.json に書く(Web の SSE / 失敗通知用)。"""
     cfg = load_config()
     DATA.mkdir(parents=True, exist_ok=True)
+    gen_id = gen_id or new_gen_id()
+    gen_dir = gen_dir_for(gen_id)
+    gen_dir.mkdir(parents=True, exist_ok=True)
     # 生成中であることを Web が決定論的に検出するためのロック(完了で必ず外す)。
     gen_lock = DATA / ".gen.lock"
-    gen_lock.write_text(prompt[:300], encoding="utf-8")
-    tid = None
+    gen_lock.write_text(json.dumps({"gen_id": gen_id, "prompt": prompt[:300]}), encoding="utf-8")
+    tid: str | None = None
+    error: str | None = None
     try:
-        print("▶ タスク生成中 …")
+        print(f"▶ タスク生成中 … gen_id={gen_id}")
         # 選択 repo を実パスへ解決して author に read-only 調査させる(repo='default'/none/未指定は調査なし)。
         repo_path = None
         if repo and repo != "default":
             repo_path = resolve_repo({"repo": repo}, cfg)
         if repo_path is not None:
             print(f"  · repo を調査(read-only): {repo_path}")
-        obj = generate_task(prompt, cfg, repo_path)
-        if not isinstance(obj, dict) or not obj.get("id") or not obj.get("goal"):
-            print("生成に失敗しました(モデル出力が不正)。")
+        obj, err = generate_task_stream(prompt, cfg, repo_path, gen_dir)
+        if obj is None or not obj.get("id") or not obj.get("goal"):
+            error = err or "invalid_output"
+            print(f"生成に失敗しました(reason={error})。")
             return 1
         base = _safe_task_id(obj["id"])
         tid, n = base, 2
@@ -879,6 +971,12 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
         auto_commit(DATA, paths, f"todo: {tid} をプロンプトから生成")
         print(f"  · 生成: {tid}")
     finally:
+        # 完了/失敗を gen.json に書き、UI の SSE が end を判定できるようにする
+        gen_status = {"status": "ok" if tid else "fail", "task_id": tid, "error": error}
+        try:
+            (gen_dir / "gen.json").write_text(json.dumps(gen_status, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
         gen_lock.unlink(missing_ok=True)  # 生成中表示は必ず解除
     if auto_run and tid:
         return cmd_run(tid)
@@ -2321,7 +2419,8 @@ def main() -> int:
         def _opt(flag: str) -> str | None:
             return rest[rest.index(flag) + 1] if flag in rest and rest.index(flag) + 1 < len(rest) else None
         return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest,
-                       _opt("--repo"), _opt("--base-branch"), "--no-pr" in rest)
+                       _opt("--repo"), _opt("--base-branch"), "--no-pr" in rest,
+                       _opt("--gen-id"))
     if cmd == "norms":
         return cmd_norms(sys.argv[2:])
     table = {"reindex": cmd_reindex, "status": cmd_status, "merges": cmd_merges}

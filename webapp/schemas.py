@@ -219,6 +219,11 @@ class GenerateInput(BaseModel):
     auto_run: bool = False
 
 
+class GenerateAccepted(BaseModel):
+    accepted: bool
+    gen_id: str  # ライブ transcript SSE と結果スナップショットの URL に使う
+
+
 class RunStartResult(BaseModel):
     accepted: bool
     reason: str | None = None

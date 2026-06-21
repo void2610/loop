@@ -36,11 +36,16 @@ def run_task(task_id: str = Depends(valid_task_id)):
     return schemas.RunStartResult(accepted=True)
 
 
-@router.post("/tasks/generate", status_code=202, openapi_extra=_EXEC)
+@router.post("/tasks/generate", status_code=202, openapi_extra=_EXEC,
+             response_model=schemas.GenerateAccepted)
 def generate_task(inp: schemas.GenerateInput):
     if not inp.prompt.strip():
         raise HTTPException(400, err("bad_input", "prompt は必須です"))
-    args = ["uv", "run", "runner.py", "gen", inp.prompt.strip()]
+    # gen_id を発行して subprocess に渡す(Web は SSE で transcript を tail し gen.json で完了判定)。
+    gen_id = runner.new_gen_id()
+    gen_dir = runner.gen_dir_for(gen_id)
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    args = ["uv", "run", "runner.py", "gen", inp.prompt.strip(), "--gen-id", gen_id]
     if inp.repo.strip():
         args += ["--repo", inp.repo.strip()]
     if inp.base_branch.strip():
@@ -51,9 +56,12 @@ def generate_task(inp: schemas.GenerateInput):
         args.append("--run")
     # 生成中ロックを即時に立てる(背景プロセスが lock を作るまでの race を避ける)。cmd_gen が完了で外す。
     runner.DATA.mkdir(parents=True, exist_ok=True)
-    (runner.DATA / ".gen.lock").write_text(inp.prompt.strip()[:300], encoding="utf-8")
+    import json as _json
+    (runner.DATA / ".gen.lock").write_text(
+        _json.dumps({"gen_id": gen_id, "prompt": inp.prompt.strip()[:300]}), encoding="utf-8",
+    )
     subprocess.Popen(args, cwd=str(util.ROOT))
-    return {"accepted": True}
+    return schemas.GenerateAccepted(accepted=True, gen_id=gen_id)
 
 
 @router.post("/dispatch", status_code=202,

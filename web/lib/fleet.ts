@@ -10,6 +10,7 @@ import {
   ApiError,
   type BranchesResponse,
   type EvidenceMeta,
+  type GenerateAccepted,
   type GenerateInput,
   type JudgmentInput,
   type LiveSnapshot,
@@ -228,7 +229,7 @@ export const peerApi = {
     }),
   // タスク生成(プロンプト→目標契約)。host 指定でその peer の Author に作らせる。
   generate: (host: string | undefined, body: GenerateInput) =>
-    peerFetchJson<{ accepted: boolean }>(host, `/tasks/generate`, {
+    peerFetchJson<GenerateAccepted>(host, `/tasks/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

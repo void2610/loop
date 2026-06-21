@@ -99,16 +99,16 @@ export function GenerateForm() {
     }
     setSubmitting(true);
     try {
-      await peerApi.generate(host, {
+      const res = await peerApi.generate(host, {
         prompt,
         repo,
         base_branch: baseBranch,
         no_pr: noPr,
         auto_run: autoRun,
       });
-      // 一覧へ遷移し「生成中」を可視化(TaskList が generating=1 でポーリング表示)。
-      const q = autoRun ? "generating=1&autorun=1" : "generating=1";
-      router.push(`/tasks?${q}`);
+      // 進行画面へ遷移し SSE で Author のライブ transcript を見せる(失敗時もここで通知)。
+      const q = new URLSearchParams({ id: res.gen_id, host, autorun: autoRun ? "1" : "" });
+      router.push(`/tasks/new/generating?${q.toString()}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "生成の起動に失敗しました");
       setSubmitting(false);
