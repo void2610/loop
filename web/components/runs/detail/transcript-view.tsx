@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { ApiError, type TranscriptEvent } from "@/lib/api";
 import { peerApi } from "@/lib/fleet";
+import { runHref } from "@/lib/runHost";
 import { Card, CardContent } from "@/components/ui/card";
 import { TranscriptEventView } from "@/components/monitor/TranscriptEventView";
 
@@ -45,7 +46,7 @@ export function TranscriptView({ runId, host }: { runId: string; host?: string }
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link
-          href={`/runs/${encodeURIComponent(runId)}${host ? `?host=${encodeURIComponent(host)}` : ""}`}
+          href={runHref(runId, host)}
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" /> run 詳細へ戻る

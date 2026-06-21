@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { serverPeerNames } from "@/lib/server-fetch";
 import { analytics } from "@/components/charts/api";
 import { BarChart, type BarDatum } from "@/components/charts/BarChart";
 import { LineChart } from "@/components/charts/LineChart";
@@ -48,22 +49,8 @@ type SummaryShape = {
 
 /** Fleet 用: 各 peer の analytics を server-side で取り、rows / summary を host 横断で合算する。 */
 async function fetchFleetAnalytics() {
-  let peerNames: string[] = [];
-  try {
-    const res = await fetch(`${process.env.API_BASE ?? "http://127.0.0.1:8765"}/api/fleet/peers`, {
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const info = (await res.json()) as {
-        self_name: string | null;
-        peers: { name: string; is_self: boolean }[];
-      };
-      // 自 host は host=undefined(:8765 直叩き)、それ以外は peer 経由
-      peerNames = info.peers.filter((p) => !p.is_self).map((p) => p.name);
-    }
-  } catch {
-    // Fleet off / 取得失敗時は自 host のみ
-  }
+  // 自 host は host=undefined(:8765 直叩き)、それ以外は peer 経由
+  const peerNames = await serverPeerNames();
   return Promise.all(
     [undefined, ...peerNames].map(async (h) => ({
       host: h,

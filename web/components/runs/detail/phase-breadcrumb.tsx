@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useRunLive } from "@/components/monitor/useRunLive";
 import { getFleetInfo, resolvePeerBase, type FleetInfo } from "@/lib/fleet";
 import { useRunHost } from "@/lib/runHost";
+import { isTerminalVerdict } from "@/lib/verdict";
 import { VerdictBadge } from "@/components/verdict-badge";
 
 // run のワークフロー位置を可視化するパンくず風ステッパ。事実の表示のみ(§1.1: 判断生成しない)。
@@ -23,15 +24,6 @@ const STEPS: { key: StepKey; label: string }[] = [
   { key: "promote", label: "Promote" },
   { key: "done", label: "Done" },
 ];
-
-// 終了 verdict: status が None になったあと front-matter に確定する集合(§4)。
-const TERMINAL_VERDICTS = new Set([
-  "pass", "fail", "handoff", "timeout", "stopped", "awaiting-merge",
-]);
-
-function isTerminal(verdict: string): boolean {
-  return TERMINAL_VERDICTS.has(verdict.toLowerCase());
-}
 
 // promote 段が「あったか/あるか」: ライブの phase=promote、または完了時 pr_url が刻まれているか、
 // awaiting-merge は確定的に promote 経由(§4 verdict 合成)。
@@ -102,7 +94,7 @@ function deriveStates(opts: {
     out.done = "pending";
     return out;
   }
-  if (isTerminal(v)) {
+  if (isTerminalVerdict(v)) {
     out.done = "done";
   }
   return out;

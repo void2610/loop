@@ -5,7 +5,8 @@ import Link from "next/link";
 
 import { ApiError } from "@/lib/api";
 import { peerApi } from "@/lib/fleet";
-import { useRunHost } from "@/lib/runHost";
+import { peerPath } from "@/lib/http";
+import { runHref, useRunHost } from "@/lib/runHost";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { DiffView } from "./diff-view";
@@ -138,15 +139,13 @@ export function EvidencePanel({ runId }: { runId: string }) {
         {transcript ? (
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             <Link
-              href={`/runs/${encodeURIComponent(runId)}/transcript${host ? `?host=${encodeURIComponent(host)}` : ""}`}
+              href={runHref(runId, host, "transcript")}
               className="font-medium text-primary hover:underline"
             >
               transcript を会話ビューで開く
             </Link>
             <a
-              href={host
-                ? `/api/peer/${encodeURIComponent(host)}/runs/${encodeURIComponent(runId)}/files/transcript.jsonl`
-                : `/api/runs/${encodeURIComponent(runId)}/files/transcript.jsonl`}
+              href={peerPath(host, `/runs/${encodeURIComponent(runId)}/files/transcript.jsonl`)}
               target="_blank"
               rel="noreferrer"
               className="text-muted-foreground hover:underline"

@@ -5,6 +5,7 @@
  * 判断・要約・推奨は一切作らない。§3.4/§3.7-5 の「最初から配列」決定に従い、
  * 単一 run(.run.lock)でも配列長 0/1 として扱う。並列化が来ても UI は不変。
  */
+import { asString } from "@/lib/coerce";
 import type { MonitorStatusData } from "@/lib/sse";
 import type { MonitorSnapshot } from "@/lib/api";
 
@@ -19,10 +20,6 @@ export type RunStatus = {
   elapsed?: number;
   started_at?: string;
 };
-
-function asString(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
 
 function asNumber(v: unknown): number | undefined {
   return typeof v === "number" ? v : undefined;

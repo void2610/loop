@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, type TaskFields, type TaskInput } from "@/lib/api";
 import { peerApi } from "@/lib/fleet";
+import { taskHref } from "@/lib/runHost";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -119,8 +120,7 @@ export function TaskForm({
       if (isNew) {
         // 新規作成は基本「自 host で作る」運用。host 指定があればその peer に作る。
         const res = host ? await peerApi.createTask(host, payload) : await api.createTask(payload);
-        const q = host ? `?host=${encodeURIComponent(host)}` : "";
-        router.push(`/tasks/${encodeURIComponent(res.task_id)}${q}`);
+        router.push(taskHref(res.task_id, host));
         router.refresh();
       } else {
         await peerApi.updateTask(host, initial.task_id, payload);

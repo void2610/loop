@@ -12,6 +12,7 @@ import { TranscriptEventView } from "@/components/monitor/TranscriptEventView";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getFleetInfo, resolvePeerBase, type FleetInfo } from "@/lib/fleet";
+import { taskHref } from "@/lib/runHost";
 import { subscribeGen, type GenEventData, type GenResult } from "@/lib/sse";
 
 // タスク生成(Author)のライブ進行画面。SSE で transcript を受け取り、end イベントで結果を表示。
@@ -175,7 +176,7 @@ export function GeneratingView({
           </Button>
           <Link
             className="text-sm text-muted-foreground underline"
-            href={`/tasks/${encodeURIComponent(result?.task_id ?? "")}${host ? `?host=${encodeURIComponent(host)}` : ""}`}
+            href={taskHref(result?.task_id ?? "", host)}
           >
             タスク詳細を開く
           </Link>

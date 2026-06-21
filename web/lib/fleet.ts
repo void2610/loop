@@ -7,7 +7,6 @@
  * server-side fetch なので CORS 関係なし。peer unreachable は per-host エラーとして残す(全体は落とさない)。
  */
 import {
-  ApiError,
   type BranchesResponse,
   type EvidenceMeta,
   type GenerateAccepted,
@@ -24,6 +23,7 @@ import {
   type TaskListResponse,
   type TranscriptResponse,
 } from "./api";
+import { jsonInit, peerFetchJson, peerFetchText, qs } from "./http";
 import type { components } from "./types";
 
 export type FleetInfo = components["schemas"]["FleetInfo"];
@@ -51,16 +51,6 @@ export async function getFleetInfo(): Promise<FleetInfo> {
 }
 
 type RunsParams = { verdict?: string; reviewed?: 0 | 1; task?: string; include_archived?: boolean };
-
-function qs(params?: RunsParams): string {
-  if (!params) return "";
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
-  }
-  const s = p.toString();
-  return s ? `?${s}` : "";
-}
 
 /** 1 peer から /api/runs を取得。失敗してもエラーを返り値に閉じ込める。 */
 export async function fetchPeerRuns(peer: FleetPeer, params?: RunsParams): Promise<PeerRunsResult> {
@@ -95,80 +85,11 @@ export function resolvePeerBase(fleet: FleetInfo | null | undefined, host: strin
   return peer.url.replace(/\/+$/, "");
 }
 
-/**
- * peer-aware な JSON fetch。POST/GET/DELETE 等の JSON 系を host 指定で叩く。
- * - host が空 / undefined → 同一オリジン /api/<path>(自 host = 従来挙動)
- * - host 指定 → /api/peer/<host>/<path>(Next route handler のプロキシ経由)
- * 既存 api.ts と同じ ApiError を投げる(呼び出し側のエラー処理を変えない)。
- */
-async function peerFetchJson<T>(
-  host: string | undefined,
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const url = host ? `/api/peer/${encodeURIComponent(host)}${path}` : `/api${path}`;
-  let res: Response;
-  try {
-    res = await fetch(url, init);
-  } catch (e) {
-    throw new ApiError(0, e instanceof Error ? e.message : "network error");
-  }
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { detail?: unknown };
-      const d = body.detail;
-      if (typeof d === "string") detail = d;
-      else if (d && typeof d === "object") {
-        const m = (d as { message?: unknown }).message;
-        if (typeof m === "string") detail = m;
-      }
-    } catch {
-      /* 非 JSON の応答はそのまま HTTP ステータスを使う */
-    }
-    throw new ApiError(res.status, detail);
-  }
-  // 204 No Content は body 空。
-  if (res.status === 204) return undefined as T;
-  // peer プロキシは content-length を剥がす(streaming 対応の副作用)ため、text() 経由で
-  // 安全に取り出す。空 body や非 JSON でも throw せず undefined 扱い。
-  const text = await res.text();
-  if (!text) return undefined as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return undefined as T;
-  }
-}
-
-/** peer 経由で生テキスト(証拠ファイル本文等)を取る。404 等は ApiError。 */
-async function peerFetchText(host: string | undefined, path: string): Promise<string> {
-  const url = host ? `/api/peer/${encodeURIComponent(host)}${path}` : `/api${path}`;
-  let res: Response;
-  try {
-    res = await fetch(url);
-  } catch (e) {
-    throw new ApiError(0, e instanceof Error ? e.message : "network error");
-  }
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
-  return await res.text();
-}
-
-function qsString(params?: RunsParams): string {
-  if (!params) return "";
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
-  }
-  const s = p.toString();
-  return s ? `?${s}` : "";
-}
-
 /** Fleet 用に host を指定できる版の write/read API。host 空なら api.* と同じ自 host 経由。 */
 export const peerApi = {
   // 一覧 / 詳細 / 証拠 / transcript
   listRuns: (host: string | undefined, params?: RunsParams) =>
-    peerFetchJson<RunListResponse>(host, `/runs${qsString(params)}`),
+    peerFetchJson<RunListResponse>(host, `/runs${qs(params)}`),
   runDetail: (host: string | undefined, runId: string) =>
     peerFetchJson<RunDetail>(host, `/runs/${encodeURIComponent(runId)}`),
   runEvidence: (host: string | undefined, runId: string) =>
@@ -181,44 +102,22 @@ export const peerApi = {
   runLive: (host: string | undefined, runId: string) =>
     peerFetchJson<LiveSnapshot>(host, `/runs/${encodeURIComponent(runId)}/live`),
   sendMessage: (host: string | undefined, runId: string, text: string) =>
-    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }),
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/message`, jsonInit("POST", { text })),
   stopRun: (host: string | undefined, runId: string) =>
     peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/stop`, { method: "POST" }),
   // 完了 run に追加指示を投じて Implementer を resume + Verifier 監査(同じ run_id を保つ)
   continueRun: (host: string | undefined, runId: string, text: string) =>
-    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/continue`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }),
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/continue`, jsonInit("POST", { text })),
   // 種類A: dispatch / 判断書き戻し / アーカイブ
   dispatch: (host: string | undefined) =>
-    peerFetchJson<RunStartResult>(host, `/dispatch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    }),
+    peerFetchJson<RunStartResult>(host, `/dispatch`, jsonInit("POST")),
   submitJudgment: (host: string | undefined, runId: string, j: JudgmentInput) =>
-    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/judgment`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(j),
-    }),
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/judgment`, jsonInit("POST", j)),
   archiveRun: (host: string | undefined, runId: string, archived: boolean) =>
-    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/archive`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ archived }),
-    }),
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/archive`, jsonInit("POST", { archived })),
   // tasks
-  listTasks: (host: string | undefined, params?: { include_archived?: boolean }) => {
-    const qs = params?.include_archived ? `?include_archived=true` : "";
-    return peerFetchJson<TaskListResponse>(host, `/tasks${qs}`);
-  },
+  listTasks: (host: string | undefined, params?: { include_archived?: boolean }) =>
+    peerFetchJson<TaskListResponse>(host, `/tasks${qs(params)}`),
   taskDetail: (host: string | undefined, taskId: string) =>
     peerFetchJson<TaskDetail>(host, `/tasks/${encodeURIComponent(taskId)}`),
   // run 起動時に Implementer に渡る brief(憲法 / 規範 / 過去 run の事実)と Author プランを取得
@@ -226,42 +125,18 @@ export const peerApi = {
     peerFetchJson<PromptPreview>(host, `/tasks/${encodeURIComponent(taskId)}/prompt-preview`),
   // タスク生成時に Author に渡る user メッセージを事前に組み立てる(read-only / subprocess 起動なし)
   authorPromptPreview: (host: string | undefined, body: { prompt: string; repo: string }) =>
-    peerFetchJson<AuthorPromptPreview>(host, `/tasks/generate/preview`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+    peerFetchJson<AuthorPromptPreview>(host, `/tasks/generate/preview`, jsonInit("POST", body)),
   runTask: (host: string | undefined, taskId: string) =>
-    peerFetchJson<RunStartResult>(host, `/tasks/${encodeURIComponent(taskId)}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    }),
+    peerFetchJson<RunStartResult>(host, `/tasks/${encodeURIComponent(taskId)}/run`, jsonInit("POST")),
   archiveTask: (host: string | undefined, taskId: string, archived: boolean) =>
-    peerFetchJson<void>(host, `/tasks/${encodeURIComponent(taskId)}/archive`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ archived }),
-    }),
+    peerFetchJson<void>(host, `/tasks/${encodeURIComponent(taskId)}/archive`, jsonInit("POST", { archived })),
   createTask: (host: string | undefined, body: TaskInput) =>
-    peerFetchJson<{ task_id: string }>(host, `/tasks`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+    peerFetchJson<{ task_id: string }>(host, `/tasks`, jsonInit("POST", body)),
   updateTask: (host: string | undefined, taskId: string, body: TaskInput) =>
-    peerFetchJson<{ task_id: string }>(host, `/tasks/${encodeURIComponent(taskId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+    peerFetchJson<{ task_id: string }>(host, `/tasks/${encodeURIComponent(taskId)}`, jsonInit("PUT", body)),
   // タスク生成(プロンプト→目標契約)。host 指定でその peer の Author に作らせる。
   generate: (host: string | undefined, body: GenerateInput) =>
-    peerFetchJson<GenerateAccepted>(host, `/tasks/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }),
+    peerFetchJson<GenerateAccepted>(host, `/tasks/generate`, jsonInit("POST", body)),
   // repo メタ
   listRepos: (host: string | undefined) =>
     peerFetchJson<ReposResponse>(host, `/repos`),

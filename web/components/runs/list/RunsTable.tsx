@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 
+import { asFiniteNumber } from "@/lib/coerce";
 import type { RunRowWithHost } from "@/lib/fleet";
+import { runHref } from "@/lib/runHost";
 import {
   Table,
   TableBody,
@@ -20,12 +22,8 @@ import { VerdictBadge } from "@/components/verdict-badge";
 
 // RunRow は loop.db 行の射影で catch-all キー(cost_usd/turns 等)が unknown 型。
 // 表示整形はフロントの責務(§2.2)。数値以外は空表示にして事実を歪めない。
-function asNumber(v: unknown): number | null {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
-}
-
 function formatCost(v: unknown): string {
-  const n = asNumber(v);
+  const n = asFiniteNumber(v);
   return n === null ? "" : `$${n.toFixed(3)}`;
 }
 
@@ -72,7 +70,7 @@ export function RunsTable({
         <TableBody>
           {active.map((r) => {
             const awaiting = r.phase === "awaiting";
-            const liveHref = `/runs/${encodeURIComponent(r.run_id)}/live?host=${encodeURIComponent(r.host)}`;
+            const liveHref = runHref(r.run_id, r.host, "live");
             return (
             <TableRow
               key={`active-${r.run_id}`}
@@ -114,7 +112,7 @@ export function RunsTable({
             );
           })}
           {runs.map((r) => {
-            const detailHref = `/runs/${encodeURIComponent(r.run_id)}?host=${encodeURIComponent(r.host)}`;
+            const detailHref = runHref(r.run_id, r.host);
             return (
             <TableRow
               key={r.run_id}
@@ -136,7 +134,7 @@ export function RunsTable({
                 {formatCost(r["cost_usd"])}
               </TableCell>
               <TableCell className="text-right tabular-nums">
-                {asNumber(r["turns"]) ?? ""}
+                {asFiniteNumber(r["turns"]) ?? ""}
               </TableCell>
               <TableCell className="font-mono text-xs text-muted-foreground">
                 {formatStarted(r.started_at)}

@@ -1,14 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
+import { stringify as asString } from "@/lib/coerce";
 import { VerdictBadge } from "@/components/verdict-badge";
 
 type Criterion = { criterion?: string; met?: boolean; evidence?: string };
-
-function asString(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  if (typeof v === "string") return v;
-  return String(v);
-}
 
 function asCriteria(v: unknown): Criterion[] {
   if (!Array.isArray(v)) return [];

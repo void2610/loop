@@ -5,6 +5,7 @@
  * 全て GET・read-only。loop.db 直読みの集計を「そのまま」受け取るだけで、解釈・序列・推奨はしない。
  * Server Component から no-store で都度取得(分析は最新スナップショット。ライブ更新はしない)。
  */
+import { serverGet } from "@/lib/server-fetch";
 import type {
   CostTimelineRow,
   GamingSuspectRow,
@@ -14,23 +15,7 @@ import type {
   VerdictSummaryRow,
 } from "./types";
 
-const BASE = process.env.API_BASE ?? "http://127.0.0.1:8765";
-// peer 経由は Next フロント(:3000)の /api/peer/<host>/* を server-side で叩く(rewrite で peer backend に転送)。
-const FRONT_BASE = process.env.FRONT_BASE ?? "http://127.0.0.1:3000";
-
-async function get<R>(path: string, host?: string): Promise<StatsEnvelope<R> | null> {
-  const url = host
-    ? `${FRONT_BASE}/api/peer/${encodeURIComponent(host)}${path}`
-    : `${BASE}/api${path}`;
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return (await res.json()) as StatsEnvelope<R>;
-  } catch {
-    // API 未起動 / loop.db 未生成でもページを壊さない(null=データなし表示)
-    return null;
-  }
-}
+const get = <R,>(path: string, host?: string) => serverGet<StatsEnvelope<R>>(path, host);
 
 /** Fleet 用: host を指定するとその peer の analytics を取る(空なら自 host)。 */
 export const analytics = {

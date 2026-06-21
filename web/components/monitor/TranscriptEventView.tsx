@@ -3,6 +3,7 @@
 import * as React from "react";
 import { ChevronRight } from "lucide-react";
 
+import { asStringOr } from "@/lib/coerce";
 import { cn } from "@/lib/utils";
 import type { RunStreamEventData } from "@/lib/sse";
 import { Markdown } from "@/components/markdown";
@@ -28,10 +29,10 @@ function clsStyle(cls: string): string {
 
 /** collapse:true(_parse_transcript 由来の純粋な表示ヒント)は初期折り畳み。 */
 export function TranscriptEventView({ ev }: { ev: RunStreamEventData }) {
-  const cls = typeof ev.cls === "string" ? ev.cls : "";
-  const label = typeof ev.label === "string" ? ev.label : cls;
-  const body = typeof ev.body === "string" ? ev.body : "";
-  const ts = typeof ev.ts === "string" ? ev.ts : "";
+  const cls = asStringOr(ev.cls, "");
+  const label = asStringOr(ev.label, cls);
+  const body = asStringOr(ev.body, "");
+  const ts = asStringOr(ev.ts, "");
   const collapse = ev.collapse === true;
 
   const [open, setOpen] = React.useState(!collapse);

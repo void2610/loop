@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { repoLabel } from "@/lib/repoLabel";
+import { runHref } from "@/lib/runHost";
 
 import { ROLES } from "./useRunLive";
 import type { RunStatus } from "./normalize";
@@ -52,7 +53,7 @@ function PhaseStepper({ phase }: { phase?: string }) {
 
 export function RunStatusCard({ run }: { run: RunStatus }) {
   const awaiting = run.phase === "awaiting";
-  const liveHref = `/runs/${encodeURIComponent(run.run_id)}/live?host=${encodeURIComponent(run.host)}`;
+  const liveHref = runHref(run.run_id, run.host, "live");
   return (
     <Link href={liveHref} className="block">
       <Card

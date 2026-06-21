@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 
 import { ApiError } from "@/lib/api";
 import { peerApi } from "@/lib/fleet";
-import { useRunHost } from "@/lib/runHost";
+import { runHref, useRunHost } from "@/lib/runHost";
+import { isTerminalVerdict } from "@/lib/verdict";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -20,8 +21,7 @@ export function ContinuePanel({ runId, verdict }: { runId: string; verdict: stri
   const [error, setError] = React.useState<string | null>(null);
 
   // 進行中(verdict 未確定)では出さない。完了済みのみ。
-  const finalized = ["pass", "fail", "handoff", "timeout", "stopped", "awaiting-merge"].includes(verdict);
-  if (!finalized) return null;
+  if (!isTerminalVerdict(verdict)) return null;
 
   const onSubmit = async () => {
     const t = text.trim();
@@ -31,8 +31,7 @@ export function ContinuePanel({ runId, verdict }: { runId: string; verdict: stri
     try {
       await peerApi.continueRun(host, runId, t);
       // 同じ run_id のライブへ。stream に append されているので過去 + 続行が連続して見える。
-      const q = host ? `?host=${encodeURIComponent(host)}` : "";
-      router.push(`/runs/${encodeURIComponent(runId)}/live${q}`);
+      router.push(runHref(runId, host, "live"));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "続行指示の送信に失敗しました");
       setSending(false);

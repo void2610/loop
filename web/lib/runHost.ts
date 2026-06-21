@@ -16,3 +16,22 @@ export const RunHostProvider = RunHostContext.Provider;
 export function useRunHost(): string | undefined {
   return React.useContext(RunHostContext);
 }
+
+/**
+ * ?host=<host> を付ける(host 空 / undefined なら付けない)。
+ * self に host を付けるか否か(merge view は付け、自 host 詳細は付けない)をここ 1 箇所で決め、
+ * 各所に散っていた `host ? \`?host=...\` : ""` の手書きと付与漏れを無くす。
+ */
+export function hostQuery(host?: string): string {
+  return host ? `?host=${encodeURIComponent(host)}` : "";
+}
+
+/** run 詳細 / live / transcript への href。host 付与は hostQuery に集約。 */
+export function runHref(runId: string, host?: string, sub?: "live" | "transcript"): string {
+  return `/runs/${encodeURIComponent(runId)}${sub ? `/${sub}` : ""}${hostQuery(host)}`;
+}
+
+/** task 詳細への href。 */
+export function taskHref(taskId: string, host?: string): string {
+  return `/tasks/${encodeURIComponent(taskId)}${hostQuery(host)}`;
+}

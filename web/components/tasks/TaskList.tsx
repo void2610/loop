@@ -8,7 +8,7 @@ import { ArchiveToggle } from "@/components/archive-toggle";
 import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
 import { RepoBadge } from "@/components/repo-badge";
 import { RunTaskButton } from "@/components/tasks/RunTaskButton";
-import { Badge } from "@/components/ui/badge";
+import { VerdictBadge } from "@/components/verdict-badge";
 import {
   Table,
   TableBody,
@@ -26,13 +26,7 @@ import {
   type GenSummaryWithHost,
   type TaskRowWithHost,
 } from "@/lib/fleet";
-
-type VerdictVariant = "pass" | "fail" | "handoff" | "outline";
-
-function verdictVariant(v: string | null | undefined): VerdictVariant {
-  if (v === "pass" || v === "fail" || v === "handoff") return v;
-  return "outline";
-}
+import { runHref, taskHref } from "@/lib/runHost";
 
 // host バッジ付きの LastRun キー: "<host>::<task_id>"(同 id が host を跨いで衝突しても分離する)
 function lastKey(host: string, taskId: string): string {
@@ -197,7 +191,7 @@ export function TaskList() {
                   </Link>
                   {g.task_id ? (
                     <Link
-                      href={`/tasks/${encodeURIComponent(g.task_id)}?host=${encodeURIComponent(g.host)}`}
+                      href={taskHref(g.task_id, g.host)}
                       className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs hover:bg-accent"
                     >
                       {g.task_id}
@@ -259,7 +253,6 @@ export function TaskList() {
             tasks.map((t) => {
               const lr = t.id ? last[lastKey(t.host, t.id)] : undefined;
               const goalFirst = (t.goal ?? "").split("\n")[0];
-              const hostQuery = `?host=${encodeURIComponent(t.host)}`;
               return (
                 <TableRow key={`${t.host}-${t.id}`} className="transition-colors hover:bg-accent/40">
                   <TableCell className="font-mono text-xs text-muted-foreground">
@@ -270,7 +263,7 @@ export function TaskList() {
                   </TableCell>
                   <TableCell>
                     <Link
-                      href={`/tasks/${encodeURIComponent(t.id)}${hostQuery}`}
+                      href={taskHref(t.id, t.host)}
                       className="font-mono text-xs font-medium text-foreground/90 hover:text-primary hover:underline"
                     >
                       {t.id}
@@ -284,10 +277,8 @@ export function TaskList() {
                   </TableCell>
                   <TableCell>
                     {lr ? (
-                      <Link href={`/runs/${encodeURIComponent(lr.run_id)}${hostQuery}`}>
-                        <Badge variant={verdictVariant(lr.verdict)}>
-                          {lr.verdict ?? "—"}
-                        </Badge>
+                      <Link href={runHref(lr.run_id, t.host)}>
+                        <VerdictBadge verdict={lr.verdict} emptyDash />
                       </Link>
                     ) : (
                       <span className="text-muted-foreground">—</span>

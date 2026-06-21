@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 
 import { ApiError, type RunDetail } from "@/lib/api";
 import { peerApi } from "@/lib/fleet";
-import { RunHostProvider } from "@/lib/runHost";
+import { stringify } from "@/lib/coerce";
+import { RunHostProvider, runHref } from "@/lib/runHost";
 import { MessageSquareText } from "lucide-react";
 
 import { repoLabel } from "@/lib/repoLabel";
@@ -29,8 +30,7 @@ import { Verifier } from "./verifier";
 import { VerdictBadge } from "@/components/verdict-badge";
 
 function fmString(fm: { [key: string]: unknown }, key: string): string {
-  const v = fm[key];
-  return typeof v === "string" ? v : v === null || v === undefined ? "" : String(v);
+  return stringify(fm[key]);
 }
 
 function isReviewed(fm: { [key: string]: unknown }): boolean {
@@ -93,14 +93,13 @@ export function RunDetailView({ runId, host }: { runId: string; host?: string })
     };
   }, [runId, host]);
 
-  const hostQuery = host ? `?host=${encodeURIComponent(host)}` : "";
   const goNext = useCallback(() => {
-    if (neighbors.next) router.push(`/runs/${encodeURIComponent(neighbors.next)}${hostQuery}`);
-  }, [neighbors.next, router, hostQuery]);
+    if (neighbors.next) router.push(runHref(neighbors.next, host));
+  }, [neighbors.next, router, host]);
 
   const goPrev = useCallback(() => {
-    if (neighbors.prev) router.push(`/runs/${encodeURIComponent(neighbors.prev)}${hostQuery}`);
-  }, [neighbors.prev, router, hostQuery]);
+    if (neighbors.prev) router.push(runHref(neighbors.prev, host));
+  }, [neighbors.prev, router, host]);
 
   // j/k はフィールド外のときのみ。⌘↵ はフィールド内でも保存(フォーム側でも捕捉)。
   useEffect(() => {
@@ -194,7 +193,7 @@ export function RunDetailView({ runId, host }: { runId: string; host?: string })
         )}
         <div className="ml-auto flex items-center gap-2">
           <Link
-            href={`/runs/${encodeURIComponent(detail.run_id)}/transcript${hostQuery}`}
+            href={runHref(detail.run_id, host, "transcript")}
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             <MessageSquareText />

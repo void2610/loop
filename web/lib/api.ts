@@ -6,6 +6,10 @@
  * 書き込み(judgment/task)は runner 経由で data/ の MD と git に着地する素通し口を叩くだけ。
  */
 import type { components } from "./types";
+import { ApiError, peerFetchJson, peerFetchText, qs, type Query } from "./http";
+
+// 凍結面: 既存の `import { ApiError } from "@/lib/api"` を壊さないよう re-export する。
+export { ApiError };
 
 type Schemas = components["schemas"];
 
@@ -51,65 +55,23 @@ export type NormCandidate = Schemas["NormCandidate"];
 export type NormActivity = Schemas["NormActivity"];
 export type ConventionsInput = Schemas["ConventionsInput"];
 
-/** JSON は同一オリジン(/api/*)を Next rewrite で uvicorn へ転送する(§1.5)。 */
-const BASE = "";
-
-export class ApiError extends Error {
-  status: number;
-  code?: string;
-  constructor(status: number, message: string, code?: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
-  }
-}
-
-type Query = Record<string, string | number | boolean | null | undefined>;
-
-function qs(query?: Query): string {
-  if (!query) return "";
-  const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(query)) {
-    if (v !== null && v !== undefined && v !== "") p.set(k, String(v));
-  }
-  const s = p.toString();
-  return s ? `?${s}` : "";
-}
-
+/**
+ * 自 host(同一オリジン /api/*)向けの薄い request アダプタ。
+ * transport 本体(fetch + ApiError 解析 + 空/非 JSON の寛容な扱い)は lib/http.ts に集約済み。
+ * JSON は Next rewrite で uvicorn へ転送する(§1.5)。
+ */
 async function request<T>(
   method: string,
   path: string,
   opts: { query?: Query; body?: unknown; raw?: boolean } = {}
 ): Promise<T> {
-  const init: RequestInit = { method, headers: {} };
-  if (opts.body !== undefined) {
-    (init.headers as Record<string, string>)["Content-Type"] = "application/json";
-    init.body = JSON.stringify(opts.body);
-  }
-  const res = await fetch(`${BASE}/api${path}${qs(opts.query)}`, init);
-  if (!res.ok) {
-    let code: string | undefined;
-    let detail = res.statusText;
-    try {
-      const j = await res.json();
-      // FastAPI の HTTPException は {detail: {...}} 形。err() ヘルパ由来の {code,message} を拾う
-      const d = j?.detail ?? j;
-      if (d && typeof d === "object") {
-        code = d.code;
-        detail = d.message ?? d.detail ?? detail;
-      } else if (typeof d === "string") {
-        detail = d;
-      }
-    } catch {
-      // body が JSON でない(text/plain 等)場合はそのまま statusText
-    }
-    throw new ApiError(res.status, detail, code);
-  }
-  if (res.status === 204 || opts.raw) {
-    return (opts.raw ? await res.text() : undefined) as T;
-  }
-  return (await res.json()) as T;
+  const full = `${path}${qs(opts.query)}`;
+  if (opts.raw) return peerFetchText(undefined, full) as Promise<T>;
+  const init: RequestInit =
+    opts.body !== undefined
+      ? { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(opts.body) }
+      : { method };
+  return peerFetchJson<T>(undefined, full, init);
 }
 
 // --- 読み取り(GET。副作用なし。reindex はインデックス再生成で契約ファイルを書き換えない) ---

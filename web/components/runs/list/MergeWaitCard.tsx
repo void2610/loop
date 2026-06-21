@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 
 import { api, type RunRow, type PrStatus } from "@/lib/api";
+import { runHref } from "@/lib/runHost";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RepoBadge } from "@/components/repo-badge";
@@ -50,13 +51,13 @@ export function MergeWaitCard({ run, onMerged }: { run: RunRow; onMerged: () => 
   const ci = ciLabel(pr?.ci);
   const state = pr?.state ?? "…";
   const host = (run as RunRow & { host?: string }).host;
-  const runHref = `/runs/${encodeURIComponent(run.run_id)}${host ? `?host=${encodeURIComponent(host)}` : ""}`;
+  const href = runHref(run.run_id, host);
   // カード全面を run 詳細へのリンクにし、PR リンクは absolute Link の上に relative z-10 で重ねる
   // (Next の Link は <a> なのでネスト不可 → 「フル面オーバーレイ + 兄弟リンク」パターン)。
   return (
     <Card className="relative border-verdict-pass/40 bg-verdict-pass/5 transition-colors hover:border-verdict-pass">
       <Link
-        href={runHref}
+        href={href}
         aria-label={`run ${run.run_id} を開く`}
         className="absolute inset-0 z-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-verdict-pass"
       />

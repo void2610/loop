@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import * as React from "react";
 
 import { getFleetInfo, resolvePeerBase, type FleetInfo } from "@/lib/fleet";
+import { runHref } from "@/lib/runHost";
 
 import { InterventionPanel } from "./InterventionPanel";
 import { LiveTranscript } from "./LiveTranscript";
@@ -35,7 +36,7 @@ export function RunLivePage({ runId, host }: { runId: string; host?: string }) {
               Runs
             </Link>
             <Link
-              href={`/runs/${encodeURIComponent(runId)}${host ? `?host=${encodeURIComponent(host)}` : ""}`}
+              href={runHref(runId, host)}
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               詳細
