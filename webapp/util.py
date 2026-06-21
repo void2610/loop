@@ -310,17 +310,23 @@ def active_runs() -> list[dict]:
             continue
         if str(d.get("phase") or "").lower() == "done":
             continue
-        # 対応する run.md の verdict が最終値なら、status.json が残骸でも active から除外
+        # 対応する run.md の verdict が最終値なら active から除外(完了済みの残骸)
         md = RUNS / f"{d['run_id']}.md"
         if md.exists() and _md_verdict_is_final(md):
             continue
-        try:  # run ディレクトリ内の最新更新が閾値より古ければ死んだ run とみなす
+        # run dir の最新更新が閾値より古い → SIGKILL 等で finalize できなかった残骸
+        try:
             newest = max((p.stat().st_mtime for p in sp.parent.iterdir() if p.is_file()),
                          default=sp.stat().st_mtime)
         except OSError:
             newest = 0
-        if now - newest > stale_after:
+        # MD が一度も書かれていない = run が成立せず subprocess が死亡したパターン。
+        # この場合は短い閾値(30秒)で残骸判定する(stale_after の 1.5h は完了 run の長尺待機用)。
+        threshold = stale_after if md.exists() else 30
+        if now - newest > threshold:
             continue
+        # subprocess が居なくなった = 親プロセスが死んだ後の残骸。生きた pid が status.json に
+        # 紐づかないため判定が難しいが、上記 2 条件(MD 完了 / 無更新 stale)でほぼ拾える。
         out.append(_add_elapsed(d))
     out.sort(key=lambda r: str(r.get("started_at") or ""))
     return out
