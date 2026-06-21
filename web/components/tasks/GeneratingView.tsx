@@ -11,8 +11,7 @@ import { PageHeader } from "@/components/page-header";
 import { TranscriptEventView } from "@/components/monitor/TranscriptEventView";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { getFleetInfo, resolvePeerBase, type FleetInfo } from "@/lib/fleet";
-import { taskHref } from "@/lib/runHost";
+import { taskHref, useResolvedPeerBase } from "@/lib/runHost";
 import { subscribeGen, type GenEventData, type GenResult } from "@/lib/sse";
 
 // タスク生成(Author)のライブ進行画面。SSE で transcript を受け取り、end イベントで結果を表示。
@@ -27,21 +26,13 @@ export function GeneratingView({
   autorun: boolean;
 }) {
   const router = useRouter();
-  const [fleet, setFleet] = React.useState<FleetInfo | null>(null);
+  const { peerBase, ready } = useResolvedPeerBase(host);
   const [events, setEvents] = React.useState<GenEventData[]>([]);
   const [result, setResult] = React.useState<GenResult | null>(null);
   const [connected, setConnected] = React.useState(false);
 
   React.useEffect(() => {
-    void getFleetInfo()
-      .then(setFleet)
-      .catch(() => setFleet({ self_name: null, peers: [] }));
-  }, []);
-
-  const peerBase = resolvePeerBase(fleet, host);
-
-  React.useEffect(() => {
-    if (!genId || fleet === null) return;
+    if (!genId || !ready) return;
     setConnected(true);
     const close = subscribeGen(
       genId,
@@ -67,7 +58,7 @@ export function GeneratingView({
       close();
       setConnected(false);
     };
-  }, [genId, fleet, peerBase]);
+  }, [genId, ready, peerBase]);
 
   // 末尾追従(ユーザーが最下部にいる時だけ追従)
   const scrollRef = React.useRef<HTMLDivElement>(null);

@@ -9,6 +9,8 @@
  */
 import * as React from "react";
 
+import { getFleetInfo, resolvePeerBase, type FleetInfo } from "./fleet";
+
 const RunHostContext = React.createContext<string | undefined>(undefined);
 
 export const RunHostProvider = RunHostContext.Provider;
@@ -34,4 +36,19 @@ export function runHref(runId: string, host?: string, sub?: "live" | "transcript
 /** task 詳細への href。 */
 export function taskHref(taskId: string, host?: string): string {
   return `/tasks/${encodeURIComponent(taskId)}${hostQuery(host)}`;
+}
+
+/**
+ * host から SSE 用 peerBase を解決するフック。fleet info を初回 1 回 fetch する定型
+ * (useState + useEffect + resolvePeerBase)を集約する。
+ * ready=false の間は fleet 未解決(self を誤購読しないよう描画を待たせる用)。
+ */
+export function useResolvedPeerBase(host?: string): { peerBase: string; ready: boolean } {
+  const [fleet, setFleet] = React.useState<FleetInfo | null>(null);
+  React.useEffect(() => {
+    void getFleetInfo()
+      .then(setFleet)
+      .catch(() => setFleet({ self_name: null, peers: [] }));
+  }, []);
+  return { peerBase: resolvePeerBase(fleet, host), ready: fleet !== null };
 }
