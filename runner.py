@@ -2248,6 +2248,11 @@ def cmd_continue(run_id: str, instructions: str) -> int:
     with (run_dir / "implementer.stream.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(marker, ensure_ascii=False) + "\n")
 
+    # 続行指示を Verifier にも見せる(`_inbox_human_input` 経由で render_verifier_prompt に注入される)。
+    # これが無いと Verifier は元 task の accept だけ見て、人間が要求した変更を「基準逸脱」と判定して revert を強制する。
+    with (run_dir / "inbox.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"text": f"続行 #{cont_count}: {instructions}"}, ensure_ascii=False) + "\n")
+
     # 前 run の verdict(awaiting-merge 等)が残っていると active_runs が「最終」と判定して
     # この続行 run を監視 UI から消す。続行が確定するまで verdict を一時的に running にする。
     _set_fm_key(md_path, "verdict", "running")
