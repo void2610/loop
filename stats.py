@@ -20,12 +20,18 @@ import duckdb
 ROOT = Path(__file__).resolve().parent
 
 
-def _db_path() -> Path:
+def _data_dir(name: str) -> str | None:
     try:
-        with (ROOT / "loop.toml").open("rb") as f:
-            d = tomllib.load(f).get("data", {}).get("dir", "data")
-    except FileNotFoundError:
-        d = "data"
+        with (ROOT / name).open("rb") as f:
+            return tomllib.load(f).get("data", {}).get("dir")
+    except (FileNotFoundError, tomllib.TOMLDecodeError):
+        return None
+
+
+def _db_path() -> Path:
+    # loop.local.toml(複数 PC で host 別 data ディレクトリを指す)が loop.toml を上書きする。
+    # これを見ないと data/loop.db(不在)を指し canned 分析が常に「loop.db がありません」になる。
+    d = _data_dir("loop.local.toml") or _data_dir("loop.toml") or "data"
     return (ROOT / d / "loop.db").resolve()
 
 

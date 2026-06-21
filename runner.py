@@ -98,6 +98,24 @@ def _split_front_matter(text: str) -> tuple[list[str], int, int]:
     return lines, 1, end
 
 
+def read_front_matter(md: Path) -> dict:
+    """task/run MD の front-matter を yaml で dict 化(無し/パース失敗/IO 失敗は {})。
+
+    run MD の FM 読みの単一窓口。loopdb.parse_front_matter は別物で、loop.db index 専用の
+    stdlib 縛り flat パーサ(yaml 非依存)なので用途を取り違えないこと。"""
+    try:
+        lines, s, e = _split_front_matter(md.read_text(encoding="utf-8"))
+    except OSError:
+        return {}
+    if e == 0:
+        return {}
+    try:
+        fm = yaml.safe_load("\n".join(lines[s:e]))
+    except yaml.YAMLError:
+        return {}
+    return fm if isinstance(fm, dict) else {}
+
+
 def parse_tasks() -> list[dict]:
     """data/tasks/*.md を走査し front-matter をタスクとして読む(ファイル名昇順=実行順)。
     `_` や `.` で始まるファイル(テンプレ/隠し)はスキップ。"""
@@ -135,15 +153,7 @@ def update_status(task_id: str, new_status: str) -> None:
     target = next((t for t in parse_tasks() if t.get("id") == task_id), None)
     if not target:
         return
-    p = target["_path"]
-    lines, s, e = _split_front_matter(p.read_text(encoding="utf-8"))
-    for k in range(s, e):
-        if lines[k].split(":", 1)[0].strip() == "status":
-            lines[k] = f"status: {new_status}"
-            break
-    else:
-        lines.insert(e, f"status: {new_status}")
-    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _set_fm_key(target["_path"], "status", new_status)
 
 
 def _task_dumper() -> type[yaml.SafeDumper]:
@@ -337,6 +347,14 @@ def _repo_entry(value: str | dict) -> tuple[str, str]:
     return str(value), "parallel"
 
 
+def _abs_repo_path(path_str: str) -> Path:
+    """repo パス文字列を絶対 resolve パスへ。~ 展開し、相対は ROOT 起点で解決する。"""
+    p = Path(path_str).expanduser()
+    if not p.is_absolute():
+        p = ROOT / p
+    return p.resolve()
+
+
 def resolve_repo(task: dict, cfg: dict) -> Path | None:
     """タスクの repo 指定を解決する。
     未指定 → [repo].path(デフォルト) / 'none' → None(no-repo) / 登録名 → [repos] のパス / それ以外 → パス。"""
@@ -349,10 +367,7 @@ def resolve_repo(task: dict, cfg: dict) -> Path | None:
     repos = cfg.get("repos", {})
     if r in repos:
         r, _ = _repo_entry(repos[r])
-    p = Path(r).expanduser()
-    if not p.is_absolute():
-        p = ROOT / p
-    return p.resolve()
+    return _abs_repo_path(r)
 
 
 def repo_mode(repo: Path | None, cfg: dict) -> str:
@@ -367,10 +382,7 @@ def repo_mode(repo: Path | None, cfg: dict) -> str:
         path_str, mode = _repo_entry(value)
         if not path_str or mode != "serial":
             continue
-        p = Path(path_str).expanduser()
-        if not p.is_absolute():
-            p = ROOT / p
-        if p.resolve() == target:
+        if _abs_repo_path(path_str) == target:
             return "serial"
     return "parallel"
 
@@ -1141,11 +1153,8 @@ def repo_norm_name(repo: Path, cfg: dict) -> str:
     (既存のタスク repo 解決と整合させ、規範を repo 単位で分離する)。"""
     target = repo.resolve()
     for name, path in (cfg.get("repos", {}) or {}).items():
-        p = Path(str(path)).expanduser()
-        if not p.is_absolute():
-            p = ROOT / p
         try:
-            if p.resolve() == target:
+            if _abs_repo_path(str(path)) == target:
                 return _safe_repo_name(name)
         except OSError:
             continue
@@ -1541,15 +1550,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
 # --- review(種類B。判断そのものは人間が Web 判断フォームで書く) ---
 
 def set_md_reviewed(md: Path) -> None:
-    lines = md.read_text(encoding="utf-8").splitlines()
-    for k, line in enumerate(lines):
-        if line.split(":", 1)[0].strip() == "reviewed":
-            lines[k] = "reviewed: true"
-            break
-    else:
-        if lines and lines[0].strip() == "---":
-            lines.insert(1, "reviewed: true")
-    md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _set_fm_key(md, "reviewed", "true")
 
 
 def _set_fm_key(path: Path, key: str, value: str) -> None:
@@ -1703,14 +1704,15 @@ def _repo_slug(repo: Path) -> str:
     return _gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], repo).stdout.strip()
 
 
-def _default_branch(repo: Path) -> str:
+def _gh_default_branch(repo: Path) -> str:
+    """GitHub 基準のデフォルトブランチ(promote/PR 用)。git ローカル基準は default_branch を使う。"""
     return _gh(["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"], repo).stdout.strip() or "main"
 
 
 def open_pr(repo: Path, branch: str, title: str, body: str, base: str | None = None) -> tuple[int | None, str]:
     """branch を push して PR を作る。既存 PR があればそれを返す。base 未指定はデフォルトブランチ。"""
     git(repo, "push", "-u", "origin", branch)
-    base = (base or "").strip() or _default_branch(repo)
+    base = (base or "").strip() or _gh_default_branch(repo)
     p = _gh(["pr", "create", "--base", base, "--head", branch, "--title", title, "--body", body], repo)
     if p.returncode == 0:
         url = p.stdout.strip().splitlines()[-1]

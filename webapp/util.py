@@ -253,21 +253,8 @@ def read_run_status(run_id: str | None = None) -> dict | None:
 
 def _md_verdict_is_final(md: "Path") -> bool:
     """run.md の front-matter から verdict を読み、最終値か判定。"""
-    try:
-        text = md.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return False
-    for line in lines[1:]:
-        s = line.strip()
-        if s == "---":
-            break
-        if s.startswith("verdict:"):
-            v = s.split(":", 1)[1].strip().strip("'\"")
-            return v in _FINAL_VERDICTS
-    return False
+    v = runner.read_front_matter(md).get("verdict")
+    return isinstance(v, str) and v in _FINAL_VERDICTS
 
 
 def _add_elapsed(d: dict) -> dict:

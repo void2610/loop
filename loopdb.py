@@ -83,6 +83,11 @@ def parse_front_matter(text: str) -> dict:
     return fm
 
 
+def _truthy(v) -> int:
+    """front-matter のスカラ真偽値を 0/1 へ(reviewed/archived 共通)。"""
+    return 1 if str(v).lower() in ("true", "1") else 0
+
+
 def _coerce(fm: dict, run_id: str, md_path: str) -> dict:
     def num(key, cast):
         v = fm.get(key)
@@ -91,12 +96,11 @@ def _coerce(fm: dict, run_id: str, md_path: str) -> dict:
         except (TypeError, ValueError):
             return None
 
-    reviewed = str(fm.get("reviewed", "false")).lower() in ("true", "1")
     return {
         "run_id": run_id,
         "task": fm.get("task"),
         "verdict": fm.get("verdict"),
-        "reviewed": 1 if reviewed else 0,
+        "reviewed": _truthy(fm.get("reviewed", "false")),
         "model": fm.get("model"),
         "cost_usd": num("cost_usd", float),
         "turns": num("turns", int),
@@ -111,7 +115,7 @@ def _coerce(fm: dict, run_id: str, md_path: str) -> dict:
         "verifier_verdict": fm.get("verifier_verdict"),
         "verifier_confidence": fm.get("verifier_confidence"),
         "repo": fm.get("repo"),
-        "archived": 1 if str(fm.get("archived", "false")).lower() in ("true", "1") else 0,
+        "archived": _truthy(fm.get("archived", "false")),
         "human_verdict": fm.get("human_verdict"),
     }
 
