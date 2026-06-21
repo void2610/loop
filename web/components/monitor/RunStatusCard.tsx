@@ -67,9 +67,12 @@ export function RunStatusCard({ run }: { run: RunStatus }) {
         }
       >
         <CardHeader className="space-y-2 pb-3">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
             <CardTitle className="text-base">{run.task ?? run.run_id}</CardTitle>
-            <Badge variant="outline">{repoLabel(run.repo)}</Badge>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {run.host ? <Badge variant="secondary" className="font-mono">{run.host}</Badge> : null}
+              <Badge variant="outline">{repoLabel(run.repo)}</Badge>
+            </div>
           </div>
           <p className="font-mono text-xs text-muted-foreground">{run.run_id}</p>
         </CardHeader>
