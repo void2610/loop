@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 
-import type { RunRow } from "@/lib/api";
 import type { RunRowWithHost } from "@/lib/fleet";
 import {
   Table,
@@ -38,16 +37,10 @@ export function RunsTable({
   runs,
   active = [],
   onChanged,
-  showHost = false,
-  selfHost,
 }: {
-  runs: RunRowWithHost[] | RunRow[];
+  runs: RunRowWithHost[];
   active?: RunStatus[];
   onChanged?: () => void;
-  // Fleet が有効(peers >= 2、または peers=1 でも self 以外を含む)なときに host 列を出す
-  showHost?: boolean;
-  // active(SSE 由来)行に充てる host 名(SSE は自 host のみ)
-  selfHost?: string;
 }) {
   const router = useRouter();
 
@@ -65,7 +58,7 @@ export function RunsTable({
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {showHost ? <TableHead className="th-label">host</TableHead> : null}
+            <TableHead className="th-label">host</TableHead>
             <TableHead className="th-label">repo</TableHead>
             <TableHead className="th-label">run</TableHead>
             <TableHead className="th-label">verdict</TableHead>
@@ -79,10 +72,7 @@ export function RunsTable({
         <TableBody>
           {active.map((r) => {
             const awaiting = r.phase === "awaiting";
-            // Fleet: host が分かるなら ?host= に乗せて peer 経由でライブ購読する。
-            const liveHref = `/runs/${encodeURIComponent(r.run_id)}/live${
-              r.host ? `?host=${encodeURIComponent(r.host)}` : ""
-            }`;
+            const liveHref = `/runs/${encodeURIComponent(r.run_id)}/live?host=${encodeURIComponent(r.host)}`;
             return (
             <TableRow
               key={`active-${r.run_id}`}
@@ -93,11 +83,7 @@ export function RunsTable({
               }
               onClick={() => router.push(liveHref)}
             >
-              {showHost ? (
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {r.host ?? selfHost ?? ""}
-                </TableCell>
-              ) : null}
+              <TableCell className="font-mono text-xs text-muted-foreground">{r.host}</TableCell>
               <TableCell>
                 <RepoBadge repo={r.repo} mono />
               </TableCell>
@@ -128,21 +114,14 @@ export function RunsTable({
             );
           })}
           {runs.map((r) => {
-            const rowHost = (r as RunRowWithHost).host;
-            const detailHref = `/runs/${encodeURIComponent(r.run_id)}${
-              rowHost ? `?host=${encodeURIComponent(rowHost)}` : ""
-            }`;
+            const detailHref = `/runs/${encodeURIComponent(r.run_id)}?host=${encodeURIComponent(r.host)}`;
             return (
             <TableRow
               key={r.run_id}
               className="cursor-pointer transition-colors hover:bg-accent/40"
               onClick={() => router.push(detailHref)}
             >
-              {showHost ? (
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {rowHost ?? ""}
-                </TableCell>
-              ) : null}
+              <TableCell className="font-mono text-xs text-muted-foreground">{r.host}</TableCell>
               <TableCell>
                 <RepoBadge repo={r.repo} mono />
               </TableCell>
@@ -166,7 +145,7 @@ export function RunsTable({
                 <ArchiveRunButton
                   runId={r.run_id}
                   archived={!!r.archived}
-                  host={rowHost}
+                  host={r.host}
                   onChanged={() => onChanged?.()}
                 />
               </TableCell>

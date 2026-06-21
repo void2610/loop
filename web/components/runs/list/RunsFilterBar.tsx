@@ -35,12 +35,10 @@ export function RunsFilterBar({
   dispatching: boolean;
   onChange: (next: RunsFilter) => void;
   onDispatch: () => void;
-  // Fleet: hostOptions が 2 件以上あるとき dispatch 用 host セレクタを出す(0/1 件なら非表示)。
-  hostOptions?: string[];
-  dispatchHost?: string;
-  onDispatchHostChange?: (host: string) => void;
+  hostOptions: string[];
+  dispatchHost: string;
+  onDispatchHostChange: (host: string) => void;
 }) {
-  const showHostSelect = (hostOptions?.length ?? 0) > 1;
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select
@@ -82,20 +80,18 @@ export function RunsFilterBar({
 
       <div className="ml-auto flex items-center gap-2">
         {/* dispatch は claude -p を起動する実行起動口(種類A)。判断は生成しない。 */}
-        {showHostSelect ? (
-          <select
-            className={selectClass}
-            value={dispatchHost ?? ""}
-            onChange={(e) => onDispatchHostChange?.(e.target.value)}
-            aria-label="dispatch する host"
-          >
-            {hostOptions!.map((h) => (
-              <option key={h} value={h}>
-                host: {h}
-              </option>
-            ))}
-          </select>
-        ) : null}
+        <select
+          className={selectClass}
+          value={dispatchHost}
+          onChange={(e) => onDispatchHostChange(e.target.value)}
+          aria-label="dispatch する host"
+        >
+          {hostOptions.map((h) => (
+            <option key={h} value={h}>
+              host: {h}
+            </option>
+          ))}
+        </select>
         <Button onClick={onDispatch} disabled={dispatching}>
           {dispatching ? "起動中…" : "次の todo を実行"}
         </Button>

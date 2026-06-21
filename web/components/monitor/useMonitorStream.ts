@@ -74,9 +74,7 @@ export function useMonitorStream(peers?: FleetPeer[], token?: string): MonitorSt
 
     const recompute = () => {
       const entries = Object.entries(perHost);
-      const mergedRuns = entries.flatMap(([host, s]) =>
-        s.runs.map((r) => ({ ...r, host: r.host ?? host })),
-      );
+      const mergedRuns = entries.flatMap(([host, s]) => s.runs.map((r) => ({ ...r, host })));
       const mergedQueue: QueueItemWithHost[] = entries.flatMap(([host, s]) =>
         (s.snap?.queue ?? []).map((q) => ({ ...q, host })),
       );

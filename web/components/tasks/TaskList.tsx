@@ -52,8 +52,6 @@ export function TaskList() {
   const [fleetInfo, setFleetInfo] = useState<FleetInfo | null>(null);
   const [peerErrors, setPeerErrors] = useState<{ name: string; error: string }[]>([]);
   const genActive = generating;
-  const selfName = fleetInfo?.self_name ?? "local";
-  const showHost = (fleetInfo?.peers.length ?? 0) > 0;
 
   useEffect(() => {
     void getFleetInfo()
@@ -66,37 +64,26 @@ export function TaskList() {
       if (!fleetInfo) return;
       try {
         const params = { include_archived: archived || undefined };
-        if (fleetInfo.peers.length === 0) {
-          // Fleet off: 自 host のみ(従来挙動)。host バッジは self_name で埋める。
-          const res = await import("@/lib/api").then((m) => m.api.listTasks(params));
-          setTasks(res.tasks.map((t) => ({ ...t, host: selfName })));
-          setLast(
-            Object.fromEntries(Object.entries(res.last).map(([k, v]) => [lastKey(selfName, k), v])),
-          );
-          setRunning(res.running);
-          setGenerating(res.generating);
-          setPeerErrors([]);
-        } else {
-          const results = await fetchAllPeerTasks(fleetInfo.peers, params);
-          const mergedTasks = results.flatMap((r) => r.tasks);
-          const mergedLast: Record<string, LastRun> = {};
-          let anyRunning = false;
-          let anyGenerating = false;
-          for (const r of results) {
-            for (const [tid, lr] of Object.entries(r.last)) {
-              mergedLast[lastKey(r.peer.name, tid)] = lr;
-            }
-            if (r.running) anyRunning = true;
-            if (r.generating) anyGenerating = true;
+        // backend は peers 設定が空でも自 host を 1 件返す。常に全 peer 並列 fetch。
+        const results = await fetchAllPeerTasks(fleetInfo.peers, params);
+        const mergedTasks = results.flatMap((r) => r.tasks);
+        const mergedLast: Record<string, LastRun> = {};
+        let anyRunning = false;
+        let anyGenerating = false;
+        for (const r of results) {
+          for (const [tid, lr] of Object.entries(r.last)) {
+            mergedLast[lastKey(r.peer.name, tid)] = lr;
           }
-          setTasks(mergedTasks);
-          setLast(mergedLast);
-          setRunning(anyRunning);
-          setGenerating(anyGenerating);
-          setPeerErrors(
-            results.filter((r) => !r.ok).map((r) => ({ name: r.peer.name, error: r.error ?? "unknown" })),
-          );
+          if (r.running) anyRunning = true;
+          if (r.generating) anyGenerating = true;
         }
+        setTasks(mergedTasks);
+        setLast(mergedLast);
+        setRunning(anyRunning);
+        setGenerating(anyGenerating);
+        setPeerErrors(
+          results.filter((r) => !r.ok).map((r) => ({ name: r.peer.name, error: r.error ?? "unknown" })),
+        );
         setError(null);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "タスク一覧の取得に失敗しました");
@@ -104,7 +91,7 @@ export function TaskList() {
         setLoading(false);
       }
     },
-    [fleetInfo, selfName],
+    [fleetInfo],
   );
 
   useEffect(() => {
@@ -166,7 +153,7 @@ export function TaskList() {
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {showHost ? <TableHead className="th-label">host</TableHead> : null}
+            <TableHead className="th-label">host</TableHead>
             <TableHead className="th-label">repo</TableHead>
             <TableHead className="th-label">id</TableHead>
             <TableHead className="th-label">status</TableHead>
@@ -181,14 +168,14 @@ export function TaskList() {
               <TableCell>
                 <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary align-middle" />
               </TableCell>
-              <TableCell colSpan={showHost ? 6 : 5} className="text-primary">
+              <TableCell colSpan={6} className="text-primary">
                 ⏳ 生成中 … Claude Code が目標契約を設計しています(数十秒)。完了すると行が確定します。
               </TableCell>
             </TableRow>
           )}
           {tasks.length === 0 && !genActive ? (
             <TableRow>
-              <TableCell colSpan={showHost ? 7 : 6} className="text-muted-foreground">
+              <TableCell colSpan={7} className="text-muted-foreground">
                 タスクがありません。「＋ 新規」で追加してください。
               </TableCell>
             </TableRow>
@@ -196,14 +183,12 @@ export function TaskList() {
             tasks.map((t) => {
               const lr = t.id ? last[lastKey(t.host, t.id)] : undefined;
               const goalFirst = (t.goal ?? "").split("\n")[0];
-              const hostQuery = showHost ? `?host=${encodeURIComponent(t.host)}` : "";
+              const hostQuery = `?host=${encodeURIComponent(t.host)}`;
               return (
                 <TableRow key={`${t.host}-${t.id}`} className="transition-colors hover:bg-accent/40">
-                  {showHost ? (
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {t.host}
-                    </TableCell>
-                  ) : null}
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {t.host}
+                  </TableCell>
                   <TableCell>
                     <RepoBadge repo={t.repo} />
                   </TableCell>
@@ -236,13 +221,13 @@ export function TaskList() {
                     <div className="flex items-center justify-end gap-2">
                       <RunTaskButton
                         taskId={t.id}
-                        host={showHost && t.host !== selfName ? t.host : undefined}
+                        host={t.host}
                         disabled={running}
                         onStarted={() => void load(includeArchived)}
                       />
                       <ArchiveTaskButton
                         taskId={t.id}
-                        host={showHost && t.host !== selfName ? t.host : undefined}
+                        host={t.host}
                         archived={!!t.archived}
                         onChanged={() => void load(includeArchived)}
                       />

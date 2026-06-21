@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import {
   fetchAllPeerRuns,
   getFleetInfo,
@@ -74,28 +74,18 @@ export function RunsView() {
         include_archived: archived || undefined,
       };
       try {
-        if (fleetInfo.peers.length === 0) {
-          // Fleet off: 従来通り自 host のみ。host バッジは self_name で埋める。
-          const res = await api.listRuns(params);
-          if (seq !== reqSeq.current) return;
-          const self = fleetInfo.self_name ?? "local";
-          setRuns(res.runs.map((r) => ({ ...r, host: self })));
-          if (res.verdicts.length > 0) setVerdicts(res.verdicts);
-          setPeerErrors([]);
-        } else {
-          // Fleet on: 全 peer 並列 fetch。エラー peer は per-host のまま残し全体は落とさない。
-          const results: PeerRunsResult[] = await fetchAllPeerRuns(fleetInfo.peers, params);
-          if (seq !== reqSeq.current) return;
-          const merged = results
-            .flatMap((r) => r.runs)
-            .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
-          setRuns(merged);
-          const allVerdicts = Array.from(new Set(results.flatMap((r) => r.verdicts)));
-          if (allVerdicts.length > 0) setVerdicts(allVerdicts);
-          setPeerErrors(
-            results.filter((r) => !r.ok).map((r) => ({ name: r.peer.name, error: r.error ?? "unknown" })),
-          );
-        }
+        // backend は peers 設定が空でも自 host を 1 件返す。常に全 peer 並列 fetch。
+        const results: PeerRunsResult[] = await fetchAllPeerRuns(fleetInfo.peers, params);
+        if (seq !== reqSeq.current) return;
+        const merged = results
+          .flatMap((r) => r.runs)
+          .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
+        setRuns(merged);
+        const allVerdicts = Array.from(new Set(results.flatMap((r) => r.verdicts)));
+        if (allVerdicts.length > 0) setVerdicts(allVerdicts);
+        setPeerErrors(
+          results.filter((r) => !r.ok).map((r) => ({ name: r.peer.name, error: r.error ?? "unknown" })),
+        );
       } catch (e) {
         if (seq !== reqSeq.current) return;
         setError(e instanceof ApiError ? e.message : "run 一覧の取得に失敗しました");
@@ -119,20 +109,9 @@ export function RunsView() {
     setNotice(null);
     setError(null);
     try {
-      // Fleet 有効時は指定 host へ peer プロキシ経由で dispatch、無効なら従来の自 host へ。
-      const useFleet = (fleetInfo?.peers.length ?? 0) > 0;
-      const hostForDispatch = useFleet && dispatchHost && dispatchHost !== fleetInfo?.self_name
-        ? dispatchHost
-        : undefined;
-      const res = hostForDispatch
-        ? await peerApi.dispatch(hostForDispatch)
-        : await api.dispatch();
+      const res = await peerApi.dispatch(dispatchHost);
       if (res.accepted) {
-        setNotice(
-          hostForDispatch
-            ? `host ${hostForDispatch} で run を起動しました。完了後に一覧へ反映されます。`
-            : "run を起動しました。完了後に一覧へ反映されます。",
-        );
+        setNotice(`host ${dispatchHost} で run を起動しました。完了後に一覧へ反映されます。`);
       } else {
         setNotice(
           res.reason === "busy"
@@ -278,8 +257,6 @@ export function RunsView() {
           runs={tableRuns}
           active={activeRuns}
           onChanged={() => void load(filter, includeArchived)}
-          showHost={(fleetInfo?.peers.length ?? 0) > 0}
-          selfHost={fleetInfo?.self_name ?? undefined}
         />
       )}
     </div>

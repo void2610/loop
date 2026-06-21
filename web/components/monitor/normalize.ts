@@ -9,10 +9,10 @@ import type { MonitorStatusData } from "@/lib/sse";
 import type { MonitorSnapshot } from "@/lib/api";
 
 /** 1 run の進行ステータス(runner が書く事実の射影)。欠損は許容する。
- * Fleet: どの host(peer name)で動いているかを示す。peers 未設定なら undefined。 */
+ * Fleet: どの host(peer name)で動いているかを示す。useMonitorStream が常に peer name で埋める。 */
 export type RunStatus = {
   run_id: string;
-  host?: string;
+  host: string;
   task?: string;
   repo?: string;
   phase?: string;
@@ -31,8 +31,10 @@ function asNumber(v: unknown): number | undefined {
 function toRunStatus(o: Record<string, unknown>): RunStatus | null {
   const runId = asString(o.run_id);
   if (!runId) return null;
+  // host は useMonitorStream の recompute で peer name に上書きされる(merge 時の責務)。
   return {
     run_id: runId,
+    host: asString(o.host) ?? "",
     task: asString(o.task),
     repo: asString(o.repo),
     phase: asString(o.phase),
