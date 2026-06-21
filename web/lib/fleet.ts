@@ -29,6 +29,7 @@ import type { components } from "./types";
 export type FleetInfo = components["schemas"]["FleetInfo"];
 export type FleetPeer = components["schemas"]["FleetPeer"];
 export type PromptPreview = components["schemas"]["PromptPreview"];
+export type AuthorPromptPreview = components["schemas"]["AuthorPromptPreview"];
 
 /** host 名タグ付きの run 行(merge view で使う)。 */
 export type RunRowWithHost = RunRow & { host: string };
@@ -223,6 +224,13 @@ export const peerApi = {
   // run 起動時に Implementer に渡る brief(憲法 / 規範 / 過去 run の事実)と Author プランを取得
   taskPromptPreview: (host: string | undefined, taskId: string) =>
     peerFetchJson<PromptPreview>(host, `/tasks/${encodeURIComponent(taskId)}/prompt-preview`),
+  // タスク生成時に Author に渡る user メッセージを事前に組み立てる(read-only / subprocess 起動なし)
+  authorPromptPreview: (host: string | undefined, body: { prompt: string; repo: string }) =>
+    peerFetchJson<AuthorPromptPreview>(host, `/tasks/generate/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   runTask: (host: string | undefined, taskId: string) =>
     peerFetchJson<RunStartResult>(host, `/tasks/${encodeURIComponent(taskId)}/run`, {
       method: "POST",

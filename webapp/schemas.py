@@ -123,6 +123,23 @@ class PromptPreview(BaseModel):
     implementer_full: str  # 実際に Implementer に渡る全文
 
 
+class AuthorPromptPreview(BaseModel):
+    repo: str | None = None
+    inspect: bool  # repo を read-only 調査するか(false なら brief は注入されない)
+    repo_history_runs: int
+    repo_section: str  # 「## 対象リポジトリ ...」
+    request: str  # 「## 依頼 <prompt>」
+    constitution: str
+    norms: str
+    repo_brief: str
+    wrapped: str  # /loop-roles:task-author で連結した user メッセージ全文
+
+
+class AuthorPromptPreviewInput(BaseModel):
+    prompt: str
+    repo: str = ""
+
+
 class ReposResponse(BaseModel):
     repos: list[str]
 

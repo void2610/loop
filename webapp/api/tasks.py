@@ -134,6 +134,27 @@ def archive_task(inp: schemas.ArchiveInput, task_id: str = Depends(valid_task_id
     return Response(status_code=204)
 
 
+@router.post("/tasks/generate/preview", response_model=schemas.AuthorPromptPreview)
+def author_prompt_preview(inp: schemas.AuthorPromptPreviewInput):
+    """タスク生成時に Author に渡る user メッセージを事前に組み立てて返す(read-only)。
+    実際に subprocess は起動しない=副作用ゼロ。GenerateForm の prompt/repo がそのまま入る。"""
+    cfg = runner.load_config()
+    repo_path = runner.resolve_repo({"repo": inp.repo}, cfg)
+    built = runner.build_author_prompt(inp.prompt, cfg, repo_path)
+    loop = cfg.get("loop", {}) or {}
+    return schemas.AuthorPromptPreview(
+        repo=str(repo_path) if repo_path else None,
+        inspect=bool(built["inspect"]),
+        repo_history_runs=int(loop.get("repo_history_runs", 8)),
+        repo_section=built["repo_section"],
+        request=built["request"],
+        constitution=built["constitution"],
+        norms=built["norms"],
+        repo_brief=built["repo_brief"],
+        wrapped=built["wrapped"],
+    )
+
+
 @router.get("/tasks/{task_id}/prompt-preview", response_model=schemas.PromptPreview)
 def task_prompt_preview(task_id: str = Depends(valid_task_id)):
     """この task で run を起こしたとき、Implementer/Verifier に注入される全文を再現する(read-only)。

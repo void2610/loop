@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { AuthorPromptPreviewView } from "@/components/tasks/AuthorPromptPreviewView";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -233,6 +234,17 @@ export function GenerateForm() {
         <a href="/tasks/new/manual" className="text-sm text-muted-foreground underline">
           手動で書く
         </a>
+      </div>
+
+      <div className="surface p-5">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Author に注入されるプロンプト(プレビュー)
+        </h2>
+        {host ? (
+          <AuthorPromptPreviewView host={host} prompt={prompt} repo={repo} />
+        ) : (
+          <p className="text-sm text-muted-foreground">host を選択するとプレビューが出ます。</p>
+        )}
       </div>
     </form>
   );

@@ -686,6 +686,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/generate/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Author Prompt Preview
+         * @description タスク生成時に Author に渡る user メッセージを事前に組み立てて返す(read-only)。
+         *     実際に subprocess は起動しない=副作用ゼロ。GenerateForm の prompt/repo がそのまま入る。
+         */
+        post: operations["author_prompt_preview_api_tasks_generate_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{task_id}/prompt-preview": {
         parameters: {
             query?: never;
@@ -721,6 +742,37 @@ export interface components {
              * @default true
              */
             archived: boolean;
+        };
+        /** AuthorPromptPreview */
+        AuthorPromptPreview: {
+            /** Repo */
+            repo?: string | null;
+            /** Inspect */
+            inspect: boolean;
+            /** Repo History Runs */
+            repo_history_runs: number;
+            /** Repo Section */
+            repo_section: string;
+            /** Request */
+            request: string;
+            /** Constitution */
+            constitution: string;
+            /** Norms */
+            norms: string;
+            /** Repo Brief */
+            repo_brief: string;
+            /** Wrapped */
+            wrapped: string;
+        };
+        /** AuthorPromptPreviewInput */
+        AuthorPromptPreviewInput: {
+            /** Prompt */
+            prompt: string;
+            /**
+             * Repo
+             * @default
+             */
+            repo: string;
         };
         /** BranchesResponse */
         BranchesResponse: {
@@ -2560,6 +2612,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    author_prompt_preview_api_tasks_generate_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorPromptPreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorPromptPreview"];
+                };
             };
             /** @description Validation Error */
             422: {

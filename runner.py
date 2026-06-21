@@ -774,6 +774,35 @@ TASK_GEN_SCHEMA = {
 }
 
 
+def build_author_prompt(prompt: str, cfg: dict, repo_path: Path | None) -> dict:
+    """Author に渡す user メッセージを部品単位で組み立てる(`generate_task_stream` / `generate_task` と同じ規則)。
+    runner / API / プレビュー UI で同じ文面を共有するための単一の出所(分岐を増やさない)。"""
+    loop = cfg["loop"]
+    inspect = repo_path is not None and repo_path.is_dir()
+    parts: list[str] = []
+    repo_section = ""
+    if inspect:
+        repo_section = f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。"
+        parts.append(repo_section)
+    parts.append(f"## 依頼\n{prompt}")
+    constitution = build_constitution_brief()
+    norms = build_norms_brief(repo_path, cfg) if inspect else ""
+    repo_brief = build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8))) if inspect else ""
+    brief = constitution + norms + repo_brief
+    if inspect and brief.strip():
+        parts.append(brief.lstrip("\n"))
+    wrapped = "/loop-roles:task-author " + "\n\n".join(parts)
+    return {
+        "inspect": inspect,
+        "repo_section": repo_section,
+        "request": f"## 依頼\n{prompt}",
+        "constitution": constitution.lstrip("\n"),
+        "norms": norms.lstrip("\n"),
+        "repo_brief": repo_brief.lstrip("\n"),
+        "wrapped": wrapped,
+    }
+
+
 def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
                          gen_dir: Path) -> tuple[dict | None, str | None]:
     """Author を stream-json で実行し、event を gen_dir/author.stream.jsonl にライブ追記。
@@ -781,14 +810,9 @@ def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
     UI が SSE で transcript を tail し、result.json を見て完了を判定する。"""
     agents, loop = cfg["agents"], cfg["loop"]
     model = agents.get("author_model") or agents["implementer_model"]
-    inspect = repo_path is not None and repo_path.is_dir()
-    parts = [f"## 依頼\n{prompt}"]
-    if inspect:
-        parts.insert(0, f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。")
-        brief = build_constitution_brief() + build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
-        if brief.strip():
-            parts.append(brief.lstrip("\n"))
-    wrapped = "/loop-roles:task-author " + "\n\n".join(parts)
+    built = build_author_prompt(prompt, cfg, repo_path)
+    inspect = built["inspect"]
+    wrapped = built["wrapped"]
     cmd = [
         "claude", "-p", wrapped,
         "--output-format", "stream-json", "--verbose",
@@ -869,17 +893,9 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
     その repo で実際に exit 0 になる verify を書かせる(repo を見ずに当て推量させない)。"""
     agents, loop = cfg["agents"], cfg["loop"]
     model = agents.get("author_model") or agents["implementer_model"]
-    inspect = repo_path is not None and repo_path.is_dir()
-    # 役定義は task-author skill(disable-model-invocation: true)に外出し済み。
-    # runner は slash で明示呼び出しし、依頼と repo 文脈を $ARGUMENTS に詰める。
-    parts = [f"## 依頼\n{prompt}"]
-    if inspect:
-        parts.insert(0, f"## 対象リポジトリ\nあなたは `{repo_path}` の中で read-only(Read/Grep/Glob)で実行されています。実構成を調べてから `verify`/`accept`/`plan` を書いてください。")
-        # 憲法(最優先)+ 承認済み規範(手続き的記憶)+ 過去 run の事実(検証済みコマンド等)。優先順位は 憲法 > 規範 > 事実。
-        brief = build_constitution_brief() + build_norms_brief(repo_path, cfg) + build_repo_brief(repo_path, int(loop.get("repo_history_runs", 8)))
-        if brief.strip():
-            parts.append(brief.lstrip("\n"))
-    wrapped = "/loop-roles:task-author " + "\n\n".join(parts)
+    built = build_author_prompt(prompt, cfg, repo_path)
+    inspect = built["inspect"]
+    wrapped = built["wrapped"]
     cmd = [
         "claude", "-p", wrapped,
         "--output-format", "json",
