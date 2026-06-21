@@ -2394,6 +2394,13 @@ def cmd_continue(run_id: str, instructions: str) -> int:
             p = run_dir / f"{r}.result.json"
             roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
+        # 続行ターンの i_result が session_id を欠く(stop/エラー終了など)場合でも、
+        # 前 run の session_id を残して run.md に書き戻す。これが消えると次回 continue が
+        # 「session_id 無し」で即 return 1 になり、ユーザーが追加指示を投げられなくなる。
+        if i_result is None:
+            i_result = {}
+        if not i_result.get("session_id"):
+            i_result["session_id"] = prev_session
         md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
                           test_verdict, verifier_verdict, verifier_obj, roles, repo=repo,
                           pr_url=fm.get("pr_url"), continue_count=cont_count)
