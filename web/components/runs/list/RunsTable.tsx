@@ -79,6 +79,10 @@ export function RunsTable({
         <TableBody>
           {active.map((r) => {
             const awaiting = r.phase === "awaiting";
+            // Fleet: host が分かるなら ?host= に乗せて peer 経由でライブ購読する。
+            const liveHref = `/runs/${encodeURIComponent(r.run_id)}/live${
+              r.host ? `?host=${encodeURIComponent(r.host)}` : ""
+            }`;
             return (
             <TableRow
               key={`active-${r.run_id}`}
@@ -87,10 +91,12 @@ export function RunsTable({
                   ? "cursor-pointer bg-verdict-handoff/10 transition-colors hover:bg-verdict-handoff/15"
                   : "cursor-pointer bg-primary/5 transition-colors hover:bg-primary/10"
               }
-              onClick={() => router.push(`/runs/${encodeURIComponent(r.run_id)}/live`)}
+              onClick={() => router.push(liveHref)}
             >
               {showHost ? (
-                <TableCell className="font-mono text-xs text-muted-foreground">{selfHost ?? ""}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">
+                  {r.host ?? selfHost ?? ""}
+                </TableCell>
               ) : null}
               <TableCell>
                 <RepoBadge repo={r.repo} mono />

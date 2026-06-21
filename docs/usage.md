@@ -43,8 +43,15 @@ repo バッジ + run_id + verdict + reviewed + cost + 開始時刻。verdict / r
 (人間が PR をマージすると run が `pass` に昇格し消える)。
 「次の todo を実行」で dispatch。アーカイブはアイコンのみ(削除はしない)。
 
-**Fleet(複数 PC)**: `loop.local.toml [fleet]` を設定すると、`host` 列が追加され全 peer の完了 run を merge view で表示する。
-到達できなかった peer は一覧上部に「offline」として残る(全体は落ちない)。dispatch / live / 介入は対象 host へリレー(別フェーズ)。
+**Fleet(複数 PC)**: `loop.local.toml [fleet]` を設定すると、`host` 列が追加され全 peer の完了 run + 実行中 run を
+merge view で表示する。到達できなかった peer は一覧上部に「offline」として残る(全体は落ちない)。
+
+- **実行中 run**: 各 peer の monitor SSE を並列購読し host バッジ付きで上部カードに出る。クリックで該当 host の
+  `/runs/<id>/live?host=<host>` に遷移し、その peer の backend に直接 SSE 接続(`:8765` 経由)。
+- **介入(続行指示)/ 停止**: `/runs/<id>/live?host=<host>` の InterventionPanel / StopRunButton が `host` 経由で
+  `/api/peer/<host>/runs/<id>/message`・`/stop` を peer プロキシで叩く。
+- **dispatch**: 一覧右上に host セレクタ(`peers >= 2` のとき表示)。選んだ host で `/api/peer/<host>/dispatch` を
+  叩いて「その PC の次の todo」を起動する。
 
 ### run detail `/runs/<id>`
 - 左: front-matter(PR があれば `pr_url`)、**事実要約**(runner 生成)、**Verifier の判定**(証拠)、

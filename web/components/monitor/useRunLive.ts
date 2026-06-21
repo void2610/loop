@@ -35,8 +35,9 @@ const EMPTY_BY_ROLE = (): Record<RoleKey, RunStreamEventData[]> => ({
  * 進行中/完了済み run のライブ transcript を購読する(§3.3: 完了 run は即時フル再生→end)。
  * 凍結された sse.ts の subscribeRun を import するだけ。再接続は EventSource 標準に委ねる。
  * token は WS6 で実体化する短命 signed query token(現状 undefined)。
+ * Fleet: peerBase に他 host の Next フロント URL を渡すと、その host の backend(:8765 置換)を購読。
  */
-export function useRunLive(runId: string, token?: string): RunLiveState {
+export function useRunLive(runId: string, token?: string, peerBase?: string): RunLiveState {
   const [byRole, setByRole] = React.useState<Record<RoleKey, RunStreamEventData[]>>(
     EMPTY_BY_ROLE
   );
@@ -64,13 +65,14 @@ export function useRunLive(runId: string, token?: string): RunLiveState {
         },
         error: () => setConnected(false),
       },
-      token
+      token,
+      peerBase,
     );
     return () => {
       close();
       setConnected(false);
     };
-  }, [runId, token]);
+  }, [runId, token, peerBase]);
 
   return { byRole, phase, ended, connected };
 }

@@ -2,11 +2,13 @@
 
 import * as React from "react";
 
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 import { Button } from "@/components/ui/button";
 
 // 実行中/awaiting の run を停止する。active な間だけ表示し、停止すると stopped で正常終了する。
-export function StopRunButton({ runId }: { runId: string }) {
+// Fleet: host を渡すと該当 peer 経由(host 空なら自 host)。
+export function StopRunButton({ runId, host }: { runId: string; host?: string }) {
   const [active, setActive] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   const [requested, setRequested] = React.useState(false);
@@ -16,7 +18,7 @@ export function StopRunButton({ runId }: { runId: string }) {
     let alive = true;
     const poll = async () => {
       try {
-        const snap = await api.runLive(runId);
+        const snap = await peerApi.runLive(host, runId);
         if (!alive) return;
         const phase = (snap.status as { phase?: string } | null)?.phase;
         setActive(snap.status != null && phase !== "done");
@@ -30,7 +32,7 @@ export function StopRunButton({ runId }: { runId: string }) {
       alive = false;
       clearInterval(t);
     };
-  }, [runId]);
+  }, [runId, host]);
 
   if (requested) {
     return <span className="text-xs text-muted-foreground">停止を要求しました(まもなく終了)</span>;
@@ -41,7 +43,7 @@ export function StopRunButton({ runId }: { runId: string }) {
     setStopping(true);
     setError(null);
     try {
-      await api.stopRun(runId);
+      await peerApi.stopRun(host, runId);
       setRequested(true);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "停止に失敗しました");

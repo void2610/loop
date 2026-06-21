@@ -7,6 +7,7 @@ import { ApiError, api } from "@/lib/api";
 import {
   fetchAllPeerRuns,
   getFleetInfo,
+  peerApi,
   type FleetInfo,
   type PeerRunsResult,
   type RunRowWithHost,
@@ -35,8 +36,11 @@ export function RunsView() {
   // Fleet: peers が空なら従来通り単一 PC 表示。複数 peer なら全 peer から並列 fetch する。
   const [fleetInfo, setFleetInfo] = useState<FleetInfo | null>(null);
   const [peerErrors, setPeerErrors] = useState<{ name: string; error: string }[]>([]);
+  // dispatch する host の選択(初期値は self、Fleet off なら未使用)
+  const [dispatchHost, setDispatchHost] = useState<string>("");
   // 実行中 run は loop.db 未登録なので SSE(status.json 由来)から取り、一覧の上に出す。
-  const { runs: activeRuns, queue, maxConcurrency } = useMonitorStream();
+  // Fleet: peers を渡すと全 host の monitor SSE を merge view(各 active run に host バッジ)。
+  const { runs: activeRuns, queue, maxConcurrency } = useMonitorStream(fleetInfo?.peers);
   // 人間の介入待ち(awaiting)は最優先で目立たせる。それ以外の実行中とは分ける。
   const awaitingRuns = activeRuns.filter((r) => r.phase === "awaiting");
   const runningRuns = activeRuns.filter((r) => r.phase !== "awaiting");
@@ -47,10 +51,13 @@ export function RunsView() {
   // 連打・タイプ中の古いレスポンスで新しい結果を上書きしないための世代カウンタ。
   const reqSeq = useRef(0);
 
-  // Fleet 情報は初回 1 回だけ取る(設定変更時は再起動前提)。
+  // Fleet 情報は初回 1 回だけ取る(設定変更時は再起動前提)。dispatchHost は self に初期化。
   useEffect(() => {
     void getFleetInfo()
-      .then(setFleetInfo)
+      .then((f) => {
+        setFleetInfo(f);
+        if (f.self_name) setDispatchHost(f.self_name);
+      })
       .catch(() => setFleetInfo({ self_name: null, peers: [] }));
   }, []);
 
@@ -112,9 +119,20 @@ export function RunsView() {
     setNotice(null);
     setError(null);
     try {
-      const res = await api.dispatch();
+      // Fleet 有効時は指定 host へ peer プロキシ経由で dispatch、無効なら従来の自 host へ。
+      const useFleet = (fleetInfo?.peers.length ?? 0) > 0;
+      const hostForDispatch = useFleet && dispatchHost && dispatchHost !== fleetInfo?.self_name
+        ? dispatchHost
+        : undefined;
+      const res = hostForDispatch
+        ? await peerApi.dispatch(hostForDispatch)
+        : await api.dispatch();
       if (res.accepted) {
-        setNotice("run を起動しました。完了後に一覧へ反映されます。");
+        setNotice(
+          hostForDispatch
+            ? `host ${hostForDispatch} で run を起動しました。完了後に一覧へ反映されます。`
+            : "run を起動しました。完了後に一覧へ反映されます。",
+        );
       } else {
         setNotice(
           res.reason === "busy"
@@ -128,7 +146,7 @@ export function RunsView() {
     } finally {
       setDispatching(false);
     }
-  }, []);
+  }, [fleetInfo, dispatchHost]);
 
   return (
     <div className="space-y-5">
@@ -147,6 +165,9 @@ export function RunsView() {
         dispatching={dispatching}
         onChange={setFilter}
         onDispatch={onDispatch}
+        hostOptions={fleetInfo?.peers.map((p) => p.name) ?? []}
+        dispatchHost={dispatchHost}
+        onDispatchHostChange={setDispatchHost}
       />
 
       {awaitingRuns.length > 0 ? (

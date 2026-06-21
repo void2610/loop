@@ -2,13 +2,15 @@
 
 import * as React from "react";
 
-import { ApiError, api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 // awaiting 中の run に人間の続行指示を送るパネル。
 // 事実(エージェントが詰まった理由)を表示し、人間が自由記述で指示する。GUI は選択肢・判断を生成しない。
-export function InterventionPanel({ runId }: { runId: string }) {
+// Fleet: host を渡すと該当 peer 経由で live snapshot / message 送信(host 空なら自 host)。
+export function InterventionPanel({ runId, host }: { runId: string; host?: string }) {
   const [awaiting, setAwaiting] = React.useState(false);
   const [question, setQuestion] = React.useState<string | null>(null);
   const [text, setText] = React.useState("");
@@ -20,7 +22,7 @@ export function InterventionPanel({ runId }: { runId: string }) {
     let alive = true;
     const poll = async () => {
       try {
-        const snap = await api.runLive(runId);
+        const snap = await peerApi.runLive(host, runId);
         if (!alive) return;
         const phase = (snap.status as { phase?: string } | null)?.phase;
         setAwaiting(phase === "awaiting");
@@ -35,7 +37,7 @@ export function InterventionPanel({ runId }: { runId: string }) {
       alive = false;
       clearInterval(t);
     };
-  }, [runId]);
+  }, [runId, host]);
 
   const onSend = async () => {
     const t = text.trim();
@@ -43,7 +45,7 @@ export function InterventionPanel({ runId }: { runId: string }) {
     setSending(true);
     setError(null);
     try {
-      await api.sendMessage(runId, t);
+      await peerApi.sendMessage(host, runId, t);
       setText("");
       setNotice("続行指示を送信しました。同一セッションで続行します…");
       setAwaiting(false); // 送信後は次の poll で awaiting が解ける

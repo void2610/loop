@@ -11,8 +11,16 @@ import { ROLES, useRunLive, type RoleKey } from "./useRunLive";
 // 末尾追従は「ユーザーが最下部にいるとき」だけ(途中を読んでいるなら飛ばさない / §3.5)。
 const STICK_THRESHOLD_PX = 80;
 
-export function LiveTranscript({ runId, token }: { runId: string; token?: string }) {
-  const { byRole, phase, ended, connected } = useRunLive(runId, token);
+export function LiveTranscript({
+  runId,
+  token,
+  peerBase,
+}: {
+  runId: string;
+  token?: string;
+  peerBase?: string;
+}) {
+  const { byRole, phase, ended, connected } = useRunLive(runId, token, peerBase);
   const [active, setActive] = React.useState<RoleKey>("implementer");
 
   // phase が来たらそのロールへ追従(ユーザーが手動選択した後も最新へ寄せる)。

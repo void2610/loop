@@ -8,9 +8,11 @@
 import type { MonitorStatusData } from "@/lib/sse";
 import type { MonitorSnapshot } from "@/lib/api";
 
-/** 1 run の進行ステータス(runner が書く事実の射影)。欠損は許容する。 */
+/** 1 run の進行ステータス(runner が書く事実の射影)。欠損は許容する。
+ * Fleet: どの host(peer name)で動いているかを示す。peers 未設定なら undefined。 */
 export type RunStatus = {
   run_id: string;
+  host?: string;
   task?: string;
   repo?: string;
   phase?: string;
