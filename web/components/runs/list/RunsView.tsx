@@ -77,9 +77,11 @@ export function RunsView() {
         // backend は peers 設定が空でも自 host を 1 件返す。常に全 peer 並列 fetch。
         const results: PeerRunsResult[] = await fetchAllPeerRuns(fleetInfo.peers, params);
         if (seq !== reqSeq.current) return;
+        // run_id は YYYY-MM-DD-HHMMSS-<task> で常に時系列順の文字列。
+        // started_at は ISO の T / 半角スペース区切りが混在して localeCompare が崩れるので使わない。
         const merged = results
           .flatMap((r) => r.runs)
-          .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
+          .sort((a, b) => (b.run_id ?? "").localeCompare(a.run_id ?? ""));
         setRuns(merged);
         const allVerdicts = Array.from(new Set(results.flatMap((r) => r.verdicts)));
         if (allVerdicts.length > 0) setVerdicts(allVerdicts);

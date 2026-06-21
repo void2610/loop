@@ -297,9 +297,10 @@ export async function fetchAllPeerGens(peers: FleetPeer[], limit = 30): Promise<
       }
     }),
   );
+  // gen_id は YYYY-MM-DD-HHMMSS-gen で時系列順の文字列。started_at の書式ブレで sort が崩れない。
   return results
     .flat()
-    .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))
+    .sort((a, b) => (b.gen_id ?? "").localeCompare(a.gen_id ?? ""))
     .slice(0, limit);
 }
 

@@ -2264,7 +2264,12 @@ def cmd_continue(run_id: str, instructions: str) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     # yaml.safe_load が ISO8601 文字列を datetime に自動変換して json.dumps が落ちるので str 強制。
     started_at_raw = fm.get("started_at")
-    if started_at_raw is None:
+    if isinstance(started_at_raw, datetime):
+        # yaml.safe_load が ISO 文字列を自動で datetime に変換する。str() 化すると半角スペース区切りになり、
+        # SQLite の文字列 ORDER BY や JS の localeCompare が壊れる(T 区切りと混在で順序逆転)。
+        # 続行で必ず ISO 8601(T 区切り)に正規化して書き戻す。
+        started_at = started_at_raw.isoformat(timespec="seconds")
+    elif started_at_raw is None:
         started_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     else:
         started_at = str(started_at_raw)
