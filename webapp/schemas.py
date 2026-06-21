@@ -112,6 +112,17 @@ class TaskDetail(BaseModel):
     body: str
 
 
+class PromptPreview(BaseModel):
+    repo: str | None = None
+    repo_history_runs: int
+    task_contract: str  # render_prompt(task) — goal+accept+constraints+verify
+    author_plan: str  # data/tasks/plans/<id>.md(空可)
+    constitution: str  # .claude/plugins/loop-roles/constitution.md
+    norms: str  # data/repo/<name>/conventions.md(承認済み)
+    repo_brief: str  # 過去 run の事実台帳(build_repo_brief)
+    implementer_full: str  # 実際に Implementer に渡る全文
+
+
 class ReposResponse(BaseModel):
     repos: list[str]
 

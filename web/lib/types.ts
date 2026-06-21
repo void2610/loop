@@ -72,6 +72,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/gen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Gens
+         * @description data/gen/<id>/ を新しい順に。各 entry に status / task_id / error / 開始時刻を載せる。
+         */
+        get: operations["list_gens_api_gen_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gen/{gen_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gen Stop
+         * @description gen_dir/stop ファイルを置く → cmd_gen の watcher が subprocess を kill して gen.json に
+         *     status:"stopped" を書く(/api/gen 一覧と SSE end イベントで反映される)。
+         */
+        post: operations["gen_stop_api_gen__gen_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/gen/{gen_id}/snapshot": {
         parameters: {
             query?: never;
@@ -431,6 +472,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{run_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Run
+         * @description 完了 run に人間の追加指示を投じて Implementer を resume + Verifier 監査まで走らせる。
+         *     同じ run_id を保ち、stream に continuation marker を追記する。background 実行(SSE で進行を見る)。
+         */
+        post: operations["continue_run_api_runs__run_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{run_id}/stop": {
         parameters: {
             query?: never;
@@ -618,6 +680,27 @@ export interface paths {
         put?: never;
         /** Archive Task */
         post: operations["archive_task_api_tasks__task_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/prompt-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Task Prompt Preview
+         * @description この task で run を起こしたとき、Implementer/Verifier に注入される全文を再現する(read-only)。
+         *     GUI は判断を生成しないため、人間が「過去 run の何が引きずられているか」を直接読めるようにする手段。
+         */
+        get: operations["task_prompt_preview_api_tasks__task_id__prompt_preview_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1016,6 +1099,25 @@ export interface components {
             merged: boolean;
             /** Ci */
             ci?: string | null;
+        };
+        /** PromptPreview */
+        PromptPreview: {
+            /** Repo */
+            repo?: string | null;
+            /** Repo History Runs */
+            repo_history_runs: number;
+            /** Task Contract */
+            task_contract: string;
+            /** Author Plan */
+            author_plan: string;
+            /** Constitution */
+            constitution: string;
+            /** Norms */
+            norms: string;
+            /** Repo Brief */
+            repo_brief: string;
+            /** Implementer Full */
+            implementer_full: string;
         };
         /** QueueItem */
         QueueItem: {
@@ -1416,6 +1518,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FleetInfo"];
+                };
+            };
+        };
+    };
+    list_gens_api_gen_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gen_stop_api_gen__gen_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                gen_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2004,6 +2166,41 @@ export interface operations {
             };
         };
     };
+    continue_run_api_runs__run_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stop_run_api_runs__run_id__stop_post: {
         parameters: {
             query?: never;
@@ -2363,6 +2560,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_prompt_preview_api_tasks__task_id__prompt_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPreview"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { ArchiveTaskButton } from "@/components/tasks/ArchiveTaskButton";
+import { PromptInjectionView } from "@/components/tasks/PromptInjectionView";
 import { RepoBadge } from "@/components/repo-badge";
 import { RunTaskButton } from "@/components/tasks/RunTaskButton";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -115,6 +116,13 @@ export function EditTaskClient({ taskId, host }: { taskId: string; host?: string
         <span className="text-sm text-muted-foreground">
           未保存の編集は反映されません。先に保存してください。
         </span>
+      </div>
+
+      <div className="surface p-5">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          プロンプトに注入される内容(プレビュー)
+        </h2>
+        <PromptInjectionView taskId={detail.fields.task_id} host={host} />
       </div>
     </div>
   );

@@ -28,6 +28,7 @@ import type { components } from "./types";
 
 export type FleetInfo = components["schemas"]["FleetInfo"];
 export type FleetPeer = components["schemas"]["FleetPeer"];
+export type PromptPreview = components["schemas"]["PromptPreview"];
 
 /** host 名タグ付きの run 行(merge view で使う)。 */
 export type RunRowWithHost = RunRow & { host: string };
@@ -219,6 +220,9 @@ export const peerApi = {
   },
   taskDetail: (host: string | undefined, taskId: string) =>
     peerFetchJson<TaskDetail>(host, `/tasks/${encodeURIComponent(taskId)}`),
+  // run 起動時に Implementer に渡る brief(憲法 / 規範 / 過去 run の事実)と Author プランを取得
+  taskPromptPreview: (host: string | undefined, taskId: string) =>
+    peerFetchJson<PromptPreview>(host, `/tasks/${encodeURIComponent(taskId)}/prompt-preview`),
   runTask: (host: string | undefined, taskId: string) =>
     peerFetchJson<RunStartResult>(host, `/tasks/${encodeURIComponent(taskId)}/run`, {
       method: "POST",

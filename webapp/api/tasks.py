@@ -132,3 +132,37 @@ def archive_task(inp: schemas.ArchiveInput, task_id: str = Depends(valid_task_id
     if not runner.set_task_archived(task_id, inp.archived):
         raise HTTPException(404, err("not_found", f"task not found: {task_id}"))
     return Response(status_code=204)
+
+
+@router.get("/tasks/{task_id}/prompt-preview", response_model=schemas.PromptPreview)
+def task_prompt_preview(task_id: str = Depends(valid_task_id)):
+    """この task で run を起こしたとき、Implementer/Verifier に注入される全文を再現する(read-only)。
+    GUI は判断を生成しないため、人間が「過去 run の何が引きずられているか」を直接読めるようにする手段。"""
+    res = runner.read_task(task_id)
+    if res is None:
+        raise HTTPException(404, err("not_found", f"task not found: {task_id}"))
+    fm, body = res
+    task = dict(fm)
+    task["id"] = task_id
+    cfg = runner.load_config()
+    repo = runner.resolve_repo(task, cfg)
+    loop = cfg.get("loop", {}) or {}
+    history = int(loop.get("repo_history_runs", 8))
+    constitution = runner.build_constitution_brief()
+    norms = runner.build_norms_brief(repo, cfg)
+    repo_brief = runner.build_repo_brief(repo, history)
+    plan = runner.read_plan(task_id)
+    task_contract = runner.render_prompt(task)
+    implementer = runner.render_implementer_prompt(
+        task, plan, source="Author の実装プラン",
+        brief=constitution + norms + repo_brief)
+    return schemas.PromptPreview(
+        repo=str(repo) if repo else None,
+        repo_history_runs=history,
+        task_contract=task_contract,
+        author_plan=plan,
+        constitution=constitution.lstrip("\n"),
+        norms=norms.lstrip("\n"),
+        repo_brief=repo_brief.lstrip("\n"),
+        implementer_full=implementer,
+    )
