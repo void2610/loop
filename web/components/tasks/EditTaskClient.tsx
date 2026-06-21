@@ -11,9 +11,11 @@ import { RunTaskButton } from "@/components/tasks/RunTaskButton";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { useMeta } from "@/components/tasks/useMeta";
 import { Badge } from "@/components/ui/badge";
-import { ApiError, api, type TaskDetail } from "@/lib/api";
+import { ApiError, type TaskDetail } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 
-export function EditTaskClient({ taskId }: { taskId: string }) {
+// Fleet: host が指定されると当該 peer 経由でタスク詳細を取得・編集・実行・アーカイブする。
+export function EditTaskClient({ taskId, host }: { taskId: string; host?: string }) {
   const router = useRouter();
   const { meta } = useMeta();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -22,8 +24,8 @@ export function EditTaskClient({ taskId }: { taskId: string }) {
 
   useEffect(() => {
     let alive = true;
-    api
-      .taskDetail(taskId)
+    peerApi
+      .taskDetail(host, taskId)
       .then((d) => {
         if (alive) setDetail(d);
       })
@@ -44,7 +46,7 @@ export function EditTaskClient({ taskId }: { taskId: string }) {
     return () => {
       alive = false;
     };
-  }, [taskId]);
+  }, [taskId, host]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">読み込み中…</p>;
@@ -78,9 +80,15 @@ export function EditTaskClient({ taskId }: { taskId: string }) {
         <RepoBadge repo={detail.fields.repo} />
         <h1 className="font-mono text-lg font-bold tracking-tight">{detail.fields.task_id}</h1>
         <Badge variant="outline" className="text-muted-foreground">編集</Badge>
+        {host ? (
+          <span className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+            host: {host}
+          </span>
+        ) : null}
         <div className="ml-auto">
           <ArchiveTaskButton
             taskId={detail.fields.task_id}
+            host={host}
             onChanged={() => {
               router.push("/tasks");
               router.refresh();
@@ -96,11 +104,12 @@ export function EditTaskClient({ taskId }: { taskId: string }) {
           repos={meta?.repos ?? []}
           statuses={meta?.statuses ?? []}
           body={detail.body}
+          host={host}
         />
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-border/60 pt-4">
-        <RunTaskButton taskId={detail.fields.task_id} confirmRun variant="default">
+        <RunTaskButton taskId={detail.fields.task_id} host={host} confirmRun variant="default">
           ▶ このタスクを実行
         </RunTaskButton>
         <span className="text-sm text-muted-foreground">

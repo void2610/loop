@@ -16,6 +16,7 @@ import {
   type RunRow,
   type RunStartResult,
   type TaskDetail,
+  type TaskInput,
   type TaskListResponse,
   type TranscriptResponse,
 } from "./api";
@@ -209,6 +210,18 @@ export const peerApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ archived }),
+    }),
+  createTask: (host: string | undefined, body: TaskInput) =>
+    peerFetchJson<{ task_id: string }>(host, `/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  updateTask: (host: string | undefined, taskId: string, body: TaskInput) =>
+    peerFetchJson<{ task_id: string }>(host, `/tasks/${encodeURIComponent(taskId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
 };
 

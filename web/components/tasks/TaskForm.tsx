@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, api, type TaskFields, type TaskInput } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -38,12 +39,15 @@ export function TaskForm({
   repos,
   statuses,
   body,
+  host,
 }: {
   mode: "create" | "edit";
   initial: TaskFields;
   repos: string[];
   statuses: string[];
   body: string;
+  // Fleet: 編集対象が他 host のタスクのときは peer 経由で書き戻す(新規作成は host=undefined=自 host)。
+  host?: string;
 }) {
   const router = useRouter();
   const isNew = mode === "create";
@@ -108,11 +112,13 @@ export function TaskForm({
     setSaving(true);
     try {
       if (isNew) {
-        const res = await api.createTask(payload);
-        router.push(`/tasks/${encodeURIComponent(res.task_id)}`);
+        // 新規作成は基本「自 host で作る」運用。host 指定があればその peer に作る。
+        const res = host ? await peerApi.createTask(host, payload) : await api.createTask(payload);
+        const q = host ? `?host=${encodeURIComponent(host)}` : "";
+        router.push(`/tasks/${encodeURIComponent(res.task_id)}${q}`);
         router.refresh();
       } else {
-        await api.updateTask(initial.task_id, payload);
+        await peerApi.updateTask(host, initial.task_id, payload);
         setSaved(true);
         router.refresh();
       }
