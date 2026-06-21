@@ -34,10 +34,11 @@ export function StopRunButton({ runId, host }: { runId: string; host?: string })
     };
   }, [runId, host]);
 
+  // active が false になった = stop が効いて完了済み。requested ラベルを永続表示しない。
+  if (!active) return null;
   if (requested) {
     return <span className="text-xs text-muted-foreground">停止を要求しました(まもなく終了)</span>;
   }
-  if (!active) return null;
 
   const onStop = async () => {
     setStopping(true);
