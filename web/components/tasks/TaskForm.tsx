@@ -232,8 +232,9 @@ export function TaskForm({
           id="goal"
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
-          rows={4}
+          rows={12}
           required
+          className="min-h-[14rem] resize-y"
         />
       </div>
 
@@ -337,7 +338,8 @@ export function TaskForm({
           id="body"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          rows={3}
+          rows={12}
+          className="min-h-[14rem] resize-y"
         />
       </div>
 
