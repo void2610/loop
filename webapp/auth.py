@@ -47,6 +47,7 @@ _EXEC_PATTERNS = (
     re.compile(r"^/api/dispatch/?$"),
     re.compile(r"^/api/tasks/[^/]+/run/?$"),
     re.compile(r"^/api/tasks/generate/?$"),
+    re.compile(r"^/api/runs/[^/]+/continue/?$"),
 )
 # 契約データ改変系(write/delete/judgment)。scope=write を要求
 _WRITE_PATTERNS = (

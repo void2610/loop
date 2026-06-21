@@ -547,7 +547,7 @@ class RoleSession:
 
     def __init__(self, role: str, wt: Path, cfg: dict, run_dir: Path, model: str, tools: list[str],
                  read_only: bool = False, extra_args: list[str] | None = None,
-                 resume_session: str | None = None):
+                 resume_session: str | None = None, append_stream: bool = False):
         loop = cfg["loop"]
         cmd = [
             "claude", "-p",
@@ -572,7 +572,8 @@ class RoleSession:
             cmd += extra_args
         self.role, self.run_dir, self.timeout = role, run_dir, loop["timeout_seconds"]
         self._lines: list[str] = []
-        self._sf = (run_dir / f"{role}.stream.jsonl").open("w", encoding="utf-8")
+        # continue_run のときは前 run の transcript を残して append(中断と続きが同じファイルで見える)。
+        self._sf = (run_dir / f"{role}.stream.jsonl").open("a" if append_stream else "w", encoding="utf-8")
         self.proc = subprocess.Popen(cmd, cwd=str(wt), stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
         self._closed = False
@@ -1382,7 +1383,8 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
                  cfg: dict, started_at: str, verify_code: int | None,
                  test_verdict: str = "none", verifier_verdict: str = "handoff",
                  verifier_obj: dict | None = None, roles: dict | None = None,
-                 repo: Path | None = None, pr_url: str | None = None) -> Path:
+                 repo: Path | None = None, pr_url: str | None = None,
+                 continue_count: int | None = None) -> Path:
     repo_sha = git(repo, "rev-parse", "HEAD").stdout.strip() if repo else ""
     skill_sha = _compute_skill_sha(repo)
     roles = roles or {}
@@ -1408,6 +1410,7 @@ def write_run_md(task: dict, run_id: str, verdict: str, result: dict | None,
         "goal_contract_sha": goal_contract_sha(task),
         "pr_url": pr_url or None,
         "started_at": started_at,
+        "continue_count": continue_count,  # 人間が continue で追加指示を投じた回数(0=なし → 省略)
     }
     fm_lines = "\n".join(f"{k}: {v}" for k, v in fm.items() if v is not None)
 
@@ -2128,6 +2131,208 @@ def _run_attempt(task: dict, run_id: str, cfg: dict, started_at: str) -> tuple[s
                 lock.release()
 
 
+def cmd_continue(run_id: str, instructions: str) -> int:
+    """完了 run に追加指示を投じて Implementer を resume し Verifier 監査まで走らせる(同じ run_id を保つ)。
+
+    挙動:
+    - 前 run の session_id を `--resume` で再注入し、Implementer の文脈を保持。
+    - implementer.stream.jsonl の末尾に `{"type":"continuation",...}` の区切り event を追記
+      (中断と追加プロンプトが同じ transcript で見える)。
+    - 既存 revise/Verifier ループを通常通り実行。
+    - run.md は最新の verdict / cost / verifier_verdict で上書き、front-matter に continue_count を加算。
+    - 既存の証拠ファイル(change.patch, verifier.json, *.result.json)は通常 run と同じ名前で上書き、
+      `verifier.cont<N>.round<M>.json` だけ続行ラウンド毎に新規作成して履歴を残す。
+    """
+    cfg = load_config()
+    loop, agents = cfg["loop"], cfg["agents"]
+    md_path = RUNS / f"{run_id}.md"
+    if not md_path.exists():
+        print(f"run not found: {run_id}", file=sys.stderr)
+        return 1
+    lines, s, e = _split_front_matter(md_path.read_text(encoding="utf-8"))
+    fm = (yaml.safe_load("\n".join(lines[s:e])) or {}) if e else {}
+    if not isinstance(fm, dict):
+        print("run の front-matter が不正", file=sys.stderr)
+        return 1
+    task_id = fm.get("task")
+    prev_session = fm.get("session_id")
+    if not task_id or not prev_session:
+        print(f"run に task / session_id が無い(task={task_id}, session={prev_session})", file=sys.stderr)
+        return 1
+    res = read_task(task_id)
+    if res is None:
+        print(f"task not found: {task_id}", file=sys.stderr)
+        return 1
+    task_fm, _body = res
+    task: dict = dict(task_fm or {})
+    task["id"] = task_id
+
+    run_dir = RUNS / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    started_at = fm.get("started_at") or datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    cont_count = int(fm.get("continue_count") or 0) + 1
+    now_iso = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+    # 中断境界 + 追加指示が transcript で見える(TranscriptEventView が type を理解する)。
+    marker = {"type": "continuation", "continue_count": cont_count,
+              "at": now_iso, "instructions": instructions}
+    with (run_dir / "implementer.stream.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps(marker, ensure_ascii=False) + "\n")
+
+    print(f"▶ continue: {run_id}(続行 #{cont_count})")
+
+    repo = resolve_repo(task, cfg)
+    if not is_git_repo(repo):
+        print(f"  · repo 不正: {repo}", file=sys.stderr)
+        return 1
+
+    # 続行は前 run の成果ブランチ(loop/<run_id>)から worktree を切り直す。
+    base_ref = f"loop/{run_id}"
+    if git(repo, "rev-parse", "--verify", base_ref).returncode != 0:
+        print(f"  · branch {base_ref} が repo に無い(前 run の成果なし)", file=sys.stderr)
+        return 1
+
+    serial = repo_mode(repo, cfg) == "serial"
+    lock = _serial_lock(repo) if serial else None
+    if lock:
+        lock.acquire()
+    try:
+        if serial:
+            wt, branch, orig_ref = enter_serial(repo, run_id, base_ref)
+        else:
+            wt = (WORKTREES_DIR / run_id).resolve()
+            if wt.exists():
+                remove_worktree(repo, wt)
+            WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
+            add = git(repo, "worktree", "add", str(wt), base_ref)
+            if add.returncode != 0:
+                print(f"  · worktree add 失敗: {add.stderr}", file=sys.stderr)
+                if lock:
+                    lock.release()
+                return 1
+            branch, orig_ref = base_ref, None
+    except BaseException:
+        if lock:
+            lock.release()
+        raise
+
+    repo_label = str(repo)
+    try:
+        i_tools = resolve_tools(task.get("allowed_tools"), agents["implementer_tools"])
+        verifier_obj = None
+        retryable = False
+        stopped = False
+        revise_occurred = False
+        test_verdict, verifier_verdict, vcode = "none", "handoff", None
+        final = "fail"
+
+        brief = build_constitution_brief() + build_norms_brief(repo, cfg) + build_repo_brief(repo, int(loop.get("repo_history_runs", 8)))
+
+        write_run_status(run_id=run_id, task=task["id"], repo=repo_label,
+                         started_at=started_at, phase="implementer")
+        print(f"  · Implementer 続行(resume={prev_session[:8]}…)")
+        impl = RoleSession("implementer", wt, cfg, run_dir, agents["implementer_model"], i_tools,
+                           resume_session=prev_session, append_stream=True)
+        i_result, inbox_seen = None, 0
+        try:
+            impl.send(f"## 人間からの追加指示(続行 #{cont_count})\n{instructions}")
+            i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
+            if i_hint == "timeout":
+                final, retryable = "timeout", True
+            elif i_hint == "error":
+                final, retryable = "fail", True
+            elif i_hint == "handoff":
+                final, verifier_verdict = "handoff", "handoff"
+            elif i_hint == "stopped":
+                final, stopped = "stopped", True
+            else:
+                revise_max = int(loop.get("implementer_revise_rounds", 2))
+                rounds = 0
+                while True:
+                    capture_diff(wt, run_dir)
+                    write_run_status(run_id=run_id, phase="verifier")
+                    test_verdict, vcode = run_verify(task, wt, run_dir)
+                    diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
+                    tp = run_dir / "test-output.txt"
+                    test_output = tp.read_text(encoding="utf-8", errors="replace") if tp.exists() else "(なし)"
+                    verifier_verdict, verifier_obj = judge_with_verifier(task, wt, run_dir, cfg, diff_text, test_output, brief)
+                    if verifier_obj is not None:
+                        # 続行ラウンドごとに別名で残す(履歴の追跡)
+                        (run_dir / f"verifier.cont{cont_count}.round{rounds + 1}.json").write_text(
+                            json.dumps(verifier_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+                    if verifier_verdict in ("pass", "fail"):
+                        break
+                    if verifier_verdict == "revise" and rounds < revise_max:
+                        rounds += 1
+                        revise_occurred = True
+                        print(f"  · Verifier が差し戻し(revise {rounds}/{revise_max})")
+                        write_run_status(run_id=run_id, phase="implementer")
+                        impl.send(render_revise_prompt(task, verifier_obj))
+                        i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
+                        if i_hint in ("timeout", "error"):
+                            final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+                            break
+                        if i_hint == "handoff":
+                            verifier_verdict = "handoff"
+                            break
+                        if i_hint == "stopped":
+                            final, stopped = "stopped", True
+                            break
+                        continue
+                    question = ((verifier_obj or {}).get("reasons")
+                                or "自動判定では確証できません。続行指示をください。")
+                    human, inbox_seen = await_human(run_id, run_dir, question, cfg, inbox_seen)
+                    if human == STOP_SIGNAL:
+                        final, stopped = "stopped", True
+                        break
+                    if human is None:
+                        verifier_verdict = "handoff"
+                        break
+                    print("  · 人間の続行指示を受領 → Implementer 続行 …")
+                    write_run_status(run_id=run_id, phase="implementer")
+                    impl.send(human)
+                    i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
+                    if i_hint in ("timeout", "error"):
+                        final, retryable = ("timeout" if i_hint == "timeout" else "fail"), True
+                        break
+                    if i_hint == "handoff":
+                        verifier_verdict = "handoff"
+                        break
+                    if i_hint == "stopped":
+                        final, stopped = "stopped", True
+                        break
+                    rounds = 0
+                if not retryable and not stopped:
+                    final = combine_verdict(test_verdict, verifier_verdict)
+        finally:
+            impl.close()
+
+        committed = commit_worktree(wt, f"loop continue {run_id} #{cont_count} → {final}")
+        _ = committed  # 既存ブランチに継続コミット。続行は promote しない(初回 run で完結)
+
+        roles = {}
+        for r in ("implementer", "verifier"):
+            p = run_dir / f"{r}.result.json"
+            roles[r] = json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+
+        md = write_run_md(task, run_id, final, i_result, cfg, started_at, vcode,
+                          test_verdict, verifier_verdict, verifier_obj, roles, repo=repo,
+                          pr_url=fm.get("pr_url"), continue_count=cont_count)
+        _finalize_run(task, run_id, run_dir, md, final, f"continue: {run_id} #{cont_count} → {final}")
+        print(f"  · test={test_verdict} / verifier={verifier_verdict} / final={final}")
+        return 0
+    finally:
+        clear_run_status(run_id, locals().get("final"))
+        try:
+            if serial:
+                leave_serial(repo, orig_ref, run_id)
+            else:
+                remove_worktree(repo, wt)
+        finally:
+            if lock:
+                lock.release()
+
+
 def _run_task_to_completion(task: dict, cfg: dict) -> str:
     """1 タスクを確定まで担当する(=1 ジョブの単位。§4.4-a)。再試行込みで最終 verdict を返す。
     claim 機構を持たない: claim は呼び出し側(cmd_run / ワーカープール)の責務。"""
@@ -2421,6 +2626,12 @@ def main() -> int:
         return cmd_gen(sys.argv[2] if len(sys.argv) > 2 else "", "--run" in rest,
                        _opt("--repo"), _opt("--base-branch"), "--no-pr" in rest,
                        _opt("--gen-id"))
+    if cmd == "continue":
+        # runner.py continue <run_id> <instructions>
+        if len(sys.argv) < 4:
+            print("usage: runner.py continue <run_id> <instructions>", file=sys.stderr)
+            return 2
+        return cmd_continue(sys.argv[2], sys.argv[3])
     if cmd == "norms":
         return cmd_norms(sys.argv[2:])
     table = {"reindex": cmd_reindex, "status": cmd_status, "merges": cmd_merges}

@@ -177,6 +177,13 @@ export const peerApi = {
     }),
   stopRun: (host: string | undefined, runId: string) =>
     peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/stop`, { method: "POST" }),
+  // 完了 run に追加指示を投じて Implementer を resume + Verifier 監査(同じ run_id を保つ)
+  continueRun: (host: string | undefined, runId: string, text: string) =>
+    peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/continue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
   // 種類A: dispatch / 判断書き戻し / アーカイブ
   dispatch: (host: string | undefined) =>
     peerFetchJson<RunStartResult>(host, `/dispatch`, {

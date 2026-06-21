@@ -9,7 +9,7 @@ import { Markdown } from "@/components/markdown";
 
 // 散文系(プロンプト/アシスタント/思考)は Markdown 装飾。構造系(ツール入力 JSON / 実行結果ログ)は
 // 改行・記号を壊さないよう monospace の <pre> のまま表示する。
-const MARKDOWN_CLS = new Set(["user", "assistant", "think"]);
+const MARKDOWN_CLS = new Set(["user", "assistant", "think", "continuation"]);
 
 // cls ごとの色分け(現行 monitor_live.html の表示分岐を移植)。事実の整形のみ。
 const CLS_STYLE: Record<string, string> = {
@@ -18,6 +18,8 @@ const CLS_STYLE: Record<string, string> = {
   think: "border-l-violet-500/50 bg-violet-500/5",
   tool: "border-l-amber-500/60 bg-amber-500/5",
   result: "border-l-zinc-500/50 bg-zinc-500/5",
+  // 続行の境界。人間の追加プロンプトを強調(中断と続きの分割線として目立つ赤系)
+  continuation: "border-l-rose-500 bg-rose-500/10",
 };
 
 function clsStyle(cls: string): string {

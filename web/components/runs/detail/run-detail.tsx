@@ -20,6 +20,7 @@ import {
   type JudgmentValues,
 } from "@/components/judgment/judgment-form";
 
+import { ContinuePanel } from "./ContinuePanel";
 import { EvidencePanel } from "./evidence-panel";
 import { FrontMatter } from "./front-matter";
 import { PhaseBreadcrumb } from "./phase-breadcrumb";
@@ -219,6 +220,7 @@ export function RunDetailView({ runId, host }: { runId: string; host?: string })
           <FrontMatter fm={fm} />
           <Summary summary={detail.summary} />
           <Verifier verifier={detail.verifier} />
+          <ContinuePanel runId={detail.run_id} verdict={verdict} />
           <EvidencePanel runId={detail.run_id} />
         </div>
 

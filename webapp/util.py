@@ -437,6 +437,15 @@ def parse_transcript(path: Path) -> list[dict]:
             o = json.loads(line)
         except json.JSONDecodeError:
             continue
+        # continue_run が挿入する境界 marker。中断と追加プロンプトが見える形で表示する。
+        if o.get("type") == "continuation":
+            events.append({
+                "cls": "continuation",
+                "label": f"━━━ 人間の追加指示 #{o.get('continue_count', '?')} ━━━",
+                "body": str(o.get("instructions") or ""),
+                "ts": (o.get("at") or "")[11:19],
+            })
+            continue
         if o.get("type") not in ("user", "assistant"):
             continue
         msg = o.get("message", {})

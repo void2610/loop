@@ -111,6 +111,28 @@ def run_pr(run_id: str = Depends(valid_run_id)):
     return schemas.PrStatus(**{k: st[k] for k in keys if st.get(k) is not None})
 
 
+@router.post("/runs/{run_id}/continue", status_code=202,
+             openapi_extra={"x-loop-exec": True})
+def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id)):
+    """完了 run に人間の追加指示を投じて Implementer を resume + Verifier 監査まで走らせる。
+    同じ run_id を保ち、stream に continuation marker を追記する。background 実行(SSE で進行を見る)。"""
+    import subprocess as _sp
+    text = (inp.text or "").strip()
+    if not text:
+        raise HTTPException(400, err("bad_input", "text は必須です"))
+    rd = util.RUNS / run_id
+    if not rd.is_dir():
+        raise HTTPException(404, err("not_found", f"run not found: {run_id}"))
+    md = util.RUNS / f"{run_id}.md"
+    if not md.exists():
+        raise HTTPException(404, err("not_found", f"run md not found: {run_id}"))
+    # .run.lock 進行中は弾く(continue は完了 run 用)
+    if (runner.DATA / ".run.lock").exists():
+        raise HTTPException(409, err("busy", "他の run が進行中です"))
+    _sp.Popen(["uv", "run", "runner.py", "continue", run_id, text], cwd=str(util.ROOT))
+    return Response(status_code=202)
+
+
 @router.post("/runs/{run_id}/stop", status_code=204,
              openapi_extra={"x-loop-kind": "A(中継)"})
 def stop_run(run_id: str = Depends(valid_run_id)):
