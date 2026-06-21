@@ -586,17 +586,32 @@ class RoleSession:
 
     def run_turn(self) -> tuple[dict | None, str]:
         """次の result イベントまで stdout を読む(セッションは開いたまま)。(result, hint) を返す。"""
-        killed = {"v": False}
+        killed = {"v": False, "by": "timeout"}
 
-        def _kill():
+        def _kill(reason: str) -> None:
             killed["v"] = True
+            killed["by"] = reason
             try:
                 self.proc.kill()
             except OSError:
                 pass
 
-        timer = threading.Timer(self.timeout, _kill)
+        timer = threading.Timer(self.timeout, lambda: _kill("timeout"))
         timer.start()
+        # 人間が UI から停止を要求した(run_dir/stop ファイル)ら subprocess を即 kill する watcher。
+        # await_human のポーリング / 実装ターン境界の到来を待たず、Implementer が長い turn の最中
+        # でも秒単位で止まる(ユーザーが「全然停止しない」と感じる原因の根絶)。
+        stop_event = threading.Event()
+
+        def _watch_stop() -> None:
+            while not stop_event.is_set():
+                if (self.run_dir / "stop").exists():
+                    _kill("stopped")
+                    return
+                stop_event.wait(0.5)
+
+        watcher = threading.Thread(target=_watch_stop, daemon=True)
+        watcher.start()
         result = None
         try:
             for line in self.proc.stdout:  # イベントが来るたび即ファイルへ(Web がライブ tail)
@@ -612,8 +627,9 @@ class RoleSession:
                     break  # 1 ターン完了。stdin は開いたまま次の send を待てる
         finally:
             timer.cancel()
+            stop_event.set()
         if killed["v"]:
-            return None, "timeout"
+            return None, killed["by"]
         if result is None:  # stdout が result 無しで尽きた(EOF/クラッシュ)
             (self.run_dir / f"{self.role}.result.raw.txt").write_text("".join(self._lines), encoding="utf-8")
             return None, "error"
