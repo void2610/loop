@@ -83,6 +83,18 @@ def list_gens(limit: int = 30):
     return {"generations": entries}
 
 
+@router.post("/gen/{gen_id}/stop", status_code=204)
+def gen_stop(gen_id: str):
+    """gen_dir/stop ファイルを置く → cmd_gen の watcher が subprocess を kill して gen.json に
+    status:"stopped" を書く(/api/gen 一覧と SSE end イベントで反映される)。"""
+    d = _gen_dir(gen_id)
+    if not d.exists():
+        raise HTTPException(404, {"error": "not_found", "message": f"gen not found: {gen_id}"})
+    (d / "stop").write_text("", encoding="utf-8")
+    from fastapi import Response as _R
+    return _R(status_code=204)
+
+
 @router.get("/gen/{gen_id}/snapshot")
 def gen_snapshot(gen_id: str):
     """完了/失敗の結果(gen.json)と既蓄積の transcript event 配列。SSE 接続前の初期化用。"""

@@ -258,6 +258,9 @@ export const peerApi = {
   // タスク生成(Author)の履歴一覧。
   listGens: (host: string | undefined, limit = 30) =>
     peerFetchJson<{ generations: GenSummary[] }>(host, `/gen?limit=${limit}`),
+  // タスク生成を途中停止(stop マーカー → cmd_gen の watcher が subprocess を kill)。
+  stopGen: (host: string | undefined, genId: string) =>
+    peerFetchJson<void>(host, `/gen/${encodeURIComponent(genId)}/stop`, { method: "POST" }),
 };
 
 export type GenSummary = {

@@ -104,7 +104,7 @@ export function subscribeRun(
 
 // --- タスク生成(Author)ストリーム ---
 export type GenEventData = TranscriptEvent & { role?: string };
-export type GenResult = { status: "ok" | "fail"; task_id?: string | null; error?: string | null };
+export type GenResult = { status: "ok" | "fail" | "stopped"; task_id?: string | null; error?: string | null };
 export type GenEndData = { gen_id: string; result: GenResult };
 
 export type GenStreamHandlers = {

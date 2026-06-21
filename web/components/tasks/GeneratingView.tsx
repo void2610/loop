@@ -1,6 +1,8 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { ApiError } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
+import { ArrowLeft, CheckCircle2, Loader2, OctagonX, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -74,6 +76,21 @@ export function GeneratingView({
 
   const ok = result?.status === "ok" && result.task_id;
   const fail = result?.status === "fail";
+  const stopped = result?.status === "stopped";
+
+  const [stopping, setStopping] = React.useState(false);
+  const [stopError, setStopError] = React.useState<string | null>(null);
+  const onStop = async () => {
+    setStopping(true);
+    setStopError(null);
+    try {
+      await peerApi.stopGen(host, genId);
+      // gen.json に書かれ end イベントが来ると result が反映される(ここでは何もしない)
+    } catch (e) {
+      setStopError(e instanceof ApiError ? e.message : "停止に失敗しました");
+      setStopping(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -101,6 +118,11 @@ export function GeneratingView({
             <CheckCircle2 className="h-4 w-4" />
             生成完了: {result.task_id}
           </span>
+        ) : stopped ? (
+          <span className="inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-muted-foreground">
+            <OctagonX className="h-4 w-4" />
+            停止しました
+          </span>
         ) : (
           <span className="inline-flex items-center gap-2 rounded-full bg-verdict-fail/15 px-3 py-1 text-verdict-fail">
             <XCircle className="h-4 w-4" />
@@ -108,6 +130,18 @@ export function GeneratingView({
           </span>
         )}
         <span className="font-mono text-xs text-muted-foreground">events: {events.length}</span>
+        {result === null ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto border-verdict-fail/40 text-verdict-fail hover:bg-verdict-fail/10 hover:text-verdict-fail"
+            onClick={onStop}
+            disabled={stopping}
+          >
+            {stopping ? "停止中…" : "停止する"}
+          </Button>
+        ) : null}
+        {stopError ? <span className="text-xs text-verdict-fail">{stopError}</span> : null}
       </div>
 
       {fail && (

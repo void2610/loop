@@ -790,17 +790,30 @@ def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
     sf = (gen_dir / "author.stream.jsonl").open("w", encoding="utf-8")
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, bufsize=1)
-    killed = {"v": False}
+    killed = {"v": False, "by": None}
 
-    def _kill() -> None:
+    def _kill(reason: str) -> None:
         killed["v"] = True
+        killed["by"] = reason
         try:
             proc.kill()
         except OSError:
             pass
 
-    timer = threading.Timer(loop["timeout_seconds"], _kill)
+    timer = threading.Timer(loop["timeout_seconds"], lambda: _kill("timeout"))
     timer.start()
+    # 人間が UI から停止を要求した時(gen_dir/stop ファイル)に subprocess を kill するウォッチャ。
+    stop_event = threading.Event()
+
+    def _watch_stop() -> None:
+        while not stop_event.is_set():
+            if (gen_dir / "stop").exists():
+                _kill("stopped")
+                return
+            stop_event.wait(0.5)
+
+    watcher = threading.Thread(target=_watch_stop, daemon=True)
+    watcher.start()
     last_result: dict | None = None
     try:
         for line in proc.stdout:  # 各イベントが来た瞬間にファイルへ flush(UI が tail)
@@ -814,6 +827,7 @@ def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
                 last_result = ev
     finally:
         timer.cancel()
+        stop_event.set()
         proc.wait()
         try:
             stderr_text = proc.stderr.read() if proc.stderr else ""
@@ -823,7 +837,7 @@ def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
             pass
         sf.close()
     if killed["v"]:
-        return None, "timeout"
+        return None, killed["by"] or "killed"
     if last_result is None:
         return None, "no_result"
     obj = last_result.get("structured_output")
@@ -973,7 +987,11 @@ def cmd_gen(prompt: str, auto_run: bool = False, repo: str | None = None,
         print(f"  · 生成: {tid}")
     finally:
         # 完了/失敗を gen.json に書き、UI の SSE が end を判定できるようにする
-        gen_status = {"status": "ok" if tid else "fail", "task_id": tid, "error": error}
+        # stopped(人間が UI から停止)は fail と区別して記録する
+        if error == "stopped":
+            gen_status = {"status": "stopped", "task_id": None, "error": None}
+        else:
+            gen_status = {"status": "ok" if tid else "fail", "task_id": tid, "error": error}
         try:
             (gen_dir / "gen.json").write_text(json.dumps(gen_status, ensure_ascii=False), encoding="utf-8")
         except OSError:
