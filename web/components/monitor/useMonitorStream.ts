@@ -62,7 +62,7 @@ export function useMonitorStream(peers?: FleetPeer[], token?: string): MonitorSt
     [peers],
   );
   const targets: Target[] = React.useMemo(() => {
-    if (!peers || peers.length === 0) return [{ name: "" }];
+    if (!peers || peers.length === 0) return [{ name: "local" }];
     return peers.map((p) => ({ name: p.name, url: p.is_self ? undefined : p.url }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetsKey]);

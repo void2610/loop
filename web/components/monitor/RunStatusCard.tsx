@@ -70,7 +70,7 @@ export function RunStatusCard({ run }: { run: RunStatus }) {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <CardTitle className="text-base">{run.task ?? run.run_id}</CardTitle>
             <div className="flex flex-wrap items-center gap-1.5">
-              {run.host ? <Badge variant="secondary" className="font-mono">{run.host}</Badge> : null}
+              <Badge variant="secondary" className="font-mono">{run.host}</Badge>
               <Badge variant="outline">{repoLabel(run.repo)}</Badge>
             </div>
           </div>
