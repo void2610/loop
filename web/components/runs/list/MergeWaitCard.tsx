@@ -4,7 +4,8 @@ import * as React from "react";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 
-import { api, type RunRow, type PrStatus } from "@/lib/api";
+import { type RunRow, type PrStatus } from "@/lib/api";
+import { peerApi } from "@/lib/fleet";
 import { runHref } from "@/lib/runHost";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,12 +28,14 @@ function ciLabel(ci: string | null | undefined): { text: string; cls: string } {
 
 export function MergeWaitCard({ run, onMerged }: { run: RunRow; onMerged: () => void }) {
   const [pr, setPr] = React.useState<PrStatus | null>(null);
+  const host = (run as RunRow & { host?: string }).host;
 
   React.useEffect(() => {
     let alive = true;
     const poll = async () => {
       try {
-        const s = await api.runPr(run.run_id);
+        // Fleet: 他 host の run は その host へ PR 状態を問い合わせる(自 host を叩くと 404 で永久に空)。
+        const s = await peerApi.runPr(host, run.run_id);
         if (!alive) return;
         setPr(s);
         if (s.merged) onMerged(); // マージ済み → server が pass 昇格済み。一覧を更新
@@ -46,11 +49,10 @@ export function MergeWaitCard({ run, onMerged }: { run: RunRow; onMerged: () => 
       alive = false;
       clearInterval(t);
     };
-  }, [run.run_id, onMerged]);
+  }, [run.run_id, host, onMerged]);
 
   const ci = ciLabel(pr?.ci);
   const state = pr?.state ?? "…";
-  const host = (run as RunRow & { host?: string }).host;
   const href = runHref(run.run_id, host);
   // カード全面を run 詳細へのリンクにし、PR リンクは absolute Link の上に relative z-10 で重ねる
   // (Next の Link は <a> なのでネスト不可 → 「フル面オーバーレイ + 兄弟リンク」パターン)。

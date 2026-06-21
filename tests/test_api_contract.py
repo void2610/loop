@@ -189,6 +189,15 @@ def test_no_delete_endpoint_exists(isolated_data, client):
     assert client.delete("/api/runs/whatever").status_code in (404, 405)
 
 
+def test_is_git_repo_is_none_safe(isolated_data):
+    """resolve_repo(repo='none') は None を返す。is_git_repo(None) はクラッシュせず False
+    (no-repo タスクが AttributeError でなく『repo が git でない』のクリーン fail に倒れる)。"""
+    assert runner.is_git_repo(None) is False
+    repo = runner.resolve_repo({"repo": "none"}, {"repos": {}, "repo": {"path": "."}})
+    assert repo is None
+    assert runner.is_git_repo(repo) is False
+
+
 # =====================================================================
 # runs: 読み取り / judgment / message / stop / pr / archive
 # =====================================================================

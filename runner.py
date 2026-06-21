@@ -388,8 +388,10 @@ def repo_mode(repo: Path | None, cfg: dict) -> str:
     return "parallel"
 
 
-def is_git_repo(path: Path) -> bool:
-    return path.is_dir() and git(path, "rev-parse", "--git-dir").returncode == 0
+def is_git_repo(path: Path | None) -> bool:
+    # resolve_repo は repo='none'(no-repo)で None を返す。None.is_dir() で落とさず False を返し、
+    # 呼び出し側(_run_attempt / continue)が「repo が git でない」のクリーンな fail に倒せるようにする。
+    return path is not None and path.is_dir() and git(path, "rev-parse", "--git-dir").returncode == 0
 
 
 def list_branches(repo: Path) -> list[str]:

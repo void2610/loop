@@ -13,6 +13,7 @@ import {
   type GenerateInput,
   type JudgmentInput,
   type LiveSnapshot,
+  type PrStatus,
   type ReposResponse,
   type RunDetail,
   type RunListResponse,
@@ -101,6 +102,9 @@ export const peerApi = {
   // ライブ / 介入 / 停止
   runLive: (host: string | undefined, runId: string) =>
     peerFetchJson<LiveSnapshot>(host, `/runs/${encodeURIComponent(runId)}/live`),
+  // awaiting-merge run の PR 状態(マージ済みなら server 側で pass へ昇格)。Fleet では run の host へ。
+  runPr: (host: string | undefined, runId: string) =>
+    peerFetchJson<PrStatus>(host, `/runs/${encodeURIComponent(runId)}/pr`),
   sendMessage: (host: string | undefined, runId: string, text: string) =>
     peerFetchJson<void>(host, `/runs/${encodeURIComponent(runId)}/message`, jsonInit("POST", { text })),
   stopRun: (host: string | undefined, runId: string) =>

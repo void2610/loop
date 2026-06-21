@@ -10,6 +10,13 @@
  *
  * 注意: /api/me と /api/auth/sse-token は webapp/auth.py のミドルウェアが直接応答する
  * (OpenAPI には出ないため types.ts に型が無い。ここで契約形を明示する)。
+ *
+ * ## 配線状況(2026-06 時点・未配線=将来用)
+ * 現状の運用は Tailnet(WireGuard)前提で backend の Bearer は未設定のため(§7)、
+ * authHeaders / bearerHeader / hasScope / canRead/Write/Execute は **どこからも呼ばれていない**。
+ * 実際の認証配線は login 画面の getToken/setToken/clearToken + /api/me のみ。これらの helper を
+ * 「認証が効いている」と誤読しないこと。Bearer 認証を有効化する際は lib/http.ts の transport
+ * (peerFetchJson)に authHeaders() を、SSE 購読(lib/sse.ts)に sse-token を配線する。
  */
 
 /** /api/me の応答(webapp/auth.py の _handle_me)。 */
