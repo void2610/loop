@@ -153,6 +153,12 @@ def continue_run(inp: schemas.MessageInput, run_id: str = Depends(valid_run_id))
             409, err("branch_missing",
                      f"前 run の成果ブランチ {base_ref} が repo に無いため続行できません"
                      " (promote 後の削除など)。新規タスクとして作り直してください。"))
+    # Popen 前に「進行中」状態を確定させる(SSE の race 防止)。
+    # ここを書かないと、子プロセス起動から worktree 準備までの数秒間、
+    # 監視 SSE は前 run の phase=done を見て即 end を流し、live ページが「完了済み」表示で止まる。
+    runner._set_fm_key(md, "verdict", "running")
+    runner.write_run_status(run_id=run_id, task=str(task_id), repo=str(repo),
+                            phase="implementer", verdict=None)
     _sp.Popen(["uv", "run", "runner.py", "continue", run_id, text], cwd=str(util.ROOT))
     return Response(status_code=202)
 

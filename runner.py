@@ -2252,10 +2252,8 @@ def cmd_continue(run_id: str, instructions: str) -> int:
     # これが無いと Verifier は元 task の accept だけ見て、人間が要求した変更を「基準逸脱」と判定して revert を強制する。
     with (run_dir / "inbox.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps({"text": f"続行 #{cont_count}: {instructions}"}, ensure_ascii=False) + "\n")
-
-    # 前 run の verdict(awaiting-merge 等)が残っていると active_runs が「最終」と判定して
-    # この続行 run を監視 UI から消す。続行が確定するまで verdict を一時的に running にする。
-    _set_fm_key(md_path, "verdict", "running")
+    # verdict=running と status.json=phase:implementer の事前確定は API 側(POST /continue)で済ませる
+    # (SSE が前 run の phase=done を見て即 end を出さないように)。runner はここでは確認のみ。
 
     serial = repo_mode(repo, cfg) == "serial"
     lock = _serial_lock(repo) if serial else None
