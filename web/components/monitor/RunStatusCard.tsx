@@ -52,8 +52,13 @@ function PhaseStepper({ phase }: { phase?: string }) {
 
 export function RunStatusCard({ run }: { run: RunStatus }) {
   const awaiting = run.phase === "awaiting";
+  // Fleet: host が分かるなら ?host= に乗せる(他 host の SSE を購読するために必須)。
+  // これが無いと self を購読してしまい「イベント待機中…」のまま終わる(実機で踏んだ)。
+  const liveHref = `/runs/${encodeURIComponent(run.run_id)}/live${
+    run.host ? `?host=${encodeURIComponent(run.host)}` : ""
+  }`;
   return (
-    <Link href={`/runs/${encodeURIComponent(run.run_id)}/live`} className="block">
+    <Link href={liveHref} className="block">
       <Card
         className={
           awaiting
