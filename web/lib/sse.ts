@@ -39,11 +39,14 @@ export type RunStreamHandlers = {
 
 /** token は WS6 で実体化する短命 signed query token(P0 は undefined)。 */
 function sseUrl(path: string, token?: string, peerBase?: string): string {
-  // peerBase が指定されたとき(Fleet で他 host を購読)は、その peer の backend URL を直接叩く。
-  // 注: peer の url は :3000 の Next フロントを指す。SSE は backend(:8765)を叩く必要があるため、
-  // :3000 → :8765 に置き換える(各 PC で tailscale serve --bg --http=8765 8765 が出ている前提)。
-  const base = peerBase ? peerBase.replace(/:3000$/, ":8765") : SSE_BASE;
+  // SSE は Next standalone(:3000)の rewrite を通すと event-stream が buffer されて
+  // 最初の event すら届かない(実測・CLAUDE.md 既知)。self / peer どちらの場合も backend(:8765)を直叩きする。
+  // - peerBase 指定(Fleet 他 host): その peer の :3000 → :8765 に置き換え
+  // - self(peerBase 未指定): SSE_BASE が空ならブラウザの origin を base にし、:3000 → :8765 に置き換え
+  //   (各 PC で tailscale serve --bg --http=8765 8765 が出ている前提)
   const fallback = typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1";
+  const raw = peerBase || SSE_BASE || fallback;
+  const base = raw.replace(/:3000(\/|$)/, ":8765$1");
   const u = new URL(`${base}/api${path}`, fallback);
   if (token) u.searchParams.set("token", token);
   return u.toString();
