@@ -34,6 +34,38 @@ def _gen_dir(gen_id: str) -> Path:
     return runner.DATA / "gen" / gen_id
 
 
+@router.get("/gen")
+def list_gens(limit: int = 30):
+    """data/gen/<id>/ を新しい順に。各 entry に status / task_id / error / 開始時刻を載せる。"""
+    base = runner.DATA / "gen"
+    if not base.exists():
+        return {"generations": []}
+    entries: list[dict] = []
+    try:
+        ids = sorted((d.name for d in base.iterdir() if d.is_dir()), reverse=True)
+    except OSError:
+        ids = []
+    for gen_id in ids[:limit]:
+        d = base / gen_id
+        result: dict | None = None
+        rp = d / "gen.json"
+        if rp.exists():
+            try:
+                result = json.loads(rp.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                result = None
+        status = (result or {}).get("status") or "running"
+        entries.append({
+            "gen_id": gen_id,
+            "status": status,
+            "task_id": (result or {}).get("task_id"),
+            "error": (result or {}).get("error"),
+            # gen_id 命名規約 "YYYY-MM-DD-HHMMSS-gen" から started_at を導出。
+            "started_at": gen_id[:17] if len(gen_id) >= 17 else None,
+        })
+    return {"generations": entries}
+
+
 @router.get("/gen/{gen_id}/snapshot")
 def gen_snapshot(gen_id: str):
     """完了/失敗の結果(gen.json)と既蓄積の transcript event 配列。SSE 接続前の初期化用。"""

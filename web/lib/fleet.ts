@@ -239,7 +239,38 @@ export const peerApi = {
     peerFetchJson<ReposResponse>(host, `/repos`),
   repoBranches: (host: string | undefined, repo: string) =>
     peerFetchJson<BranchesResponse>(host, `/repos/branches?repo=${encodeURIComponent(repo)}`),
+  // タスク生成(Author)の履歴一覧。
+  listGens: (host: string | undefined, limit = 30) =>
+    peerFetchJson<{ generations: GenSummary[] }>(host, `/gen?limit=${limit}`),
 };
+
+export type GenSummary = {
+  gen_id: string;
+  status: "ok" | "fail" | "running" | string;
+  task_id: string | null;
+  error: string | null;
+  started_at: string | null;
+};
+
+export type GenSummaryWithHost = GenSummary & { host: string };
+
+/** 全 peer の /api/gen を並列 fetch し host 付きで時刻降順 merge。 */
+export async function fetchAllPeerGens(peers: FleetPeer[], limit = 30): Promise<GenSummaryWithHost[]> {
+  const results = await Promise.all(
+    peers.map(async (p) => {
+      try {
+        const res = await peerApi.listGens(p.is_self ? undefined : p.name, limit);
+        return res.generations.map((g) => ({ ...g, host: p.name }));
+      } catch {
+        return [] as GenSummaryWithHost[];
+      }
+    }),
+  );
+  return results
+    .flat()
+    .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))
+    .slice(0, limit);
+}
 
 /** Fleet 用に host を持たせた TaskRow(merge view で「どの PC のタスクか」を出す)。 */
 export type TaskRowWithHost = components["schemas"]["TaskRow"] & { host: string };

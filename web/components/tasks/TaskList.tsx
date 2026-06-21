@@ -19,9 +19,11 @@ import {
 } from "@/components/ui/table";
 import { ApiError, type LastRun } from "@/lib/api";
 import {
+  fetchAllPeerGens,
   fetchAllPeerTasks,
   getFleetInfo,
   type FleetInfo,
+  type GenSummaryWithHost,
   type TaskRowWithHost,
 } from "@/lib/fleet";
 
@@ -51,6 +53,7 @@ export function TaskList() {
   // Fleet: peers が空なら自 host のみ。複数 peer ならすべてから merge fetch。
   const [fleetInfo, setFleetInfo] = useState<FleetInfo | null>(null);
   const [peerErrors, setPeerErrors] = useState<{ name: string; error: string }[]>([]);
+  const [gens, setGens] = useState<GenSummaryWithHost[]>([]);
   const genActive = generating;
 
   useEffect(() => {
@@ -66,6 +69,8 @@ export function TaskList() {
         const params = { include_archived: archived || undefined };
         // backend は peers 設定が空でも自 host を 1 件返す。常に全 peer 並列 fetch。
         const results = await fetchAllPeerTasks(fleetInfo.peers, params);
+        // 同タイミングで生成履歴も refresh(失敗 / 実行中も上部に出すため)
+        void fetchAllPeerGens(fleetInfo.peers, 10).then(setGens);
         const mergedTasks = results.flatMap((r) => r.tasks);
         const mergedLast: Record<string, LastRun> = {};
         let anyRunning = false;
@@ -141,6 +146,61 @@ export function TaskList() {
                 <span className="font-mono">{p.name}</span>: {p.error}
               </li>
             ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {gens.length > 0 ? (
+        <div className="space-y-2">
+          <p className="th-label">
+            最近の生成試行
+            <span className="ml-2 font-normal tabular-nums text-muted-foreground">
+              {gens.length}
+            </span>
+          </p>
+          <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+            {gens.map((g) => {
+              const color =
+                g.status === "ok"
+                  ? "text-verdict-pass"
+                  : g.status === "fail"
+                    ? "text-verdict-fail"
+                    : "text-primary";
+              const label =
+                g.status === "ok" ? "✓ 生成完了" : g.status === "fail" ? "✗ 失敗" : "● 実行中";
+              return (
+                <li key={`${g.host}-${g.gen_id}`} className="flex items-center gap-3 px-3 py-2 text-sm">
+                  <span className={`shrink-0 ${color}`}>{label}</span>
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                    {g.host}
+                  </span>
+                  <Link
+                    href={`/tasks/new/generating?id=${encodeURIComponent(g.gen_id)}&host=${encodeURIComponent(g.host)}`}
+                    className="shrink-0 font-mono text-xs text-foreground underline-offset-2 hover:underline"
+                  >
+                    {g.gen_id}
+                  </Link>
+                  {g.task_id ? (
+                    <Link
+                      href={`/tasks/${encodeURIComponent(g.task_id)}?host=${encodeURIComponent(g.host)}`}
+                      className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs hover:bg-accent"
+                    >
+                      {g.task_id}
+                    </Link>
+                  ) : null}
+                  {g.error ? (
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      {g.error}
+                    </span>
+                  ) : (
+                    <span className="min-w-0 flex-1" />
+                  )}
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                    {g.started_at ?? ""}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}
