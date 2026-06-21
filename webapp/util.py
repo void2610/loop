@@ -294,7 +294,8 @@ def _stale_after_seconds() -> int:
 def active_runs() -> list[dict]:
     """進行中(phase != done)の全 run の status.json を集約して返す(N 本同時の監視用)。
     真実は各 runs/<id>/status.json。完了は clear_run_status が phase=done にする。
-    SIGKILL 等で done 化されず残った status は、run ディレクトリの無更新時間で stale 判定して除く(削除はしない)。"""
+    SIGKILL 等で done 化されず残った status は、(a) 対応する run.md の verdict が最終値 か
+    (b) run ディレクトリの無更新時間が閾値超え のいずれかで stale 判定して除く(削除はしない)。"""
     out: list[dict] = []
     if not RUNS.exists():
         return out
@@ -308,6 +309,10 @@ def active_runs() -> list[dict]:
         if not isinstance(d, dict) or not d.get("run_id"):
             continue
         if str(d.get("phase") or "").lower() == "done":
+            continue
+        # 対応する run.md の verdict が最終値なら、status.json が残骸でも active から除外
+        md = RUNS / f"{d['run_id']}.md"
+        if md.exists() and _md_verdict_is_final(md):
             continue
         try:  # run ディレクトリ内の最新更新が閾値より古ければ死んだ run とみなす
             newest = max((p.stat().st_mtime for p in sp.parent.iterdir() if p.is_file()),
