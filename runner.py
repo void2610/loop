@@ -2314,7 +2314,22 @@ def cmd_continue(run_id: str, instructions: str) -> int:
             _existing = 0
         i_result, inbox_seen = None, _existing
         try:
-            impl.send(f"## 人間からの追加指示(続行 #{cont_count})\n{instructions}")
+            # 続行指示が元 task の accept/verify と矛盾するときは、worktree だけでなく
+            # **task 契約ファイル** も人間の意図に合わせて書き換える権限を Implementer に与える
+            # (これがないと Verifier が元基準と矛盾したまま revise を繰り返して loop が回らない)。
+            task_md_path = TASKS_DIR / f"{task['id']}.md"
+            impl.send(
+                f"## 人間からの追加指示(続行 #{cont_count})\n{instructions}\n\n"
+                f"## 続行時の特例(契約更新)\n"
+                f"あなたは worktree(対象 repo)に加えて、loop の task 契約ファイル "
+                f"`{task_md_path}` も編集できます。\n"
+                f"人間の追加指示が現行 task の `accept` / `verify` / `constraints` / `goal` と"
+                f"矛盾する場合、worktree の実装を変えるだけでなく、**契約ファイル側の YAML "
+                f"front-matter を人間の意図に合わせて書き換えてください**(accept の文言、"
+                f"verify コマンド、constraints の禁止項目 等)。契約を更新しない限り Verifier は "
+                f"古い基準で判定して revise を繰り返し、人間の指示が反映されません。\n"
+                f"編集の方針: 人間の指示で **明示的に変わるもの**(例: 日本語パス→英字パス)を "
+                f"accept / verify に反映する。それ以外の元基準はそのまま残す。")
             i_result, i_hint, inbox_seen = _drive_implementer(impl, run_id, run_dir, cfg, inbox_seen)
             if i_hint == "timeout":
                 final, retryable = "timeout", True
@@ -2330,6 +2345,14 @@ def cmd_continue(run_id: str, instructions: str) -> int:
                 while True:
                     capture_diff(wt, run_dir)
                     write_run_status(run_id=run_id, phase="verifier")
+                    # 続行で Implementer が task 契約ファイルを書き換えた可能性があるので、
+                    # 各ラウンドの判定前に task 契約を読み直す(verify / accept / constraints が最新になる)。
+                    _res = read_task(task["id"])
+                    if _res is not None:
+                        _fm, _body = _res
+                        _new_task = dict(_fm or {})
+                        _new_task["id"] = task["id"]
+                        task = _new_task
                     test_verdict, vcode = run_verify(task, wt, run_dir)
                     diff_text = (run_dir / "change.patch").read_text(encoding="utf-8", errors="replace")
                     tp = run_dir / "test-output.txt"
