@@ -779,7 +779,8 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
         "claude", "-p", wrapped,
         "--output-format", "json",
         "--model", model,
-        "--max-turns", "12" if inspect else "8",  # repo 調査ぶん少し増やす。設計のみで空回り防止に小さく
+        # Unity 等 巨大ツリーの inspect でも turn を使い切らないよう余裕を持つ。
+        "--max-turns", "30" if inspect else "8",
         "--max-budget-usd", str(loop["max_budget_usd"]),
         "--permission-mode", loop.get("permission_mode", "default"),
         "--allowedTools", "Read", "Grep", "Glob",  # 生成は read-only 調査のみ
@@ -792,10 +793,19 @@ def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
                               timeout=loop["timeout_seconds"])
         result = json.loads(proc.stdout)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
+        print(f"  ! Author 失敗({type(e).__name__}):", e, file=sys.stderr)
+        if isinstance(e, json.JSONDecodeError):
+            print(f"  stdout 先頭: {(proc.stdout or '')[:500]!r}", file=sys.stderr)
+            print(f"  stderr 先頭: {(proc.stderr or '')[:500]!r}", file=sys.stderr)
         return None
     obj = result.get("structured_output")
-    return obj if isinstance(obj, dict) else None
+    if not isinstance(obj, dict):
+        # 構造化出力が空 → max-turns 到達 / モデル拒否 / scheme 不一致 を疑う(stop_reason / result を残す)
+        print(f"  ! Author 失敗(structured_output 空): stop_reason={result.get('stop_reason')!r}", file=sys.stderr)
+        print(f"  result 先頭: {json.dumps(result, ensure_ascii=False)[:500]}", file=sys.stderr)
+        return None
+    return obj
 
 
 def _safe_task_id(raw: str) -> str:
