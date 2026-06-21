@@ -2169,7 +2169,12 @@ def cmd_continue(run_id: str, instructions: str) -> int:
 
     run_dir = RUNS / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    started_at = fm.get("started_at") or datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    # yaml.safe_load が ISO8601 文字列を datetime に自動変換して json.dumps が落ちるので str 強制。
+    started_at_raw = fm.get("started_at")
+    if started_at_raw is None:
+        started_at = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    else:
+        started_at = str(started_at_raw)
     cont_count = int(fm.get("continue_count") or 0) + 1
     now_iso = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 

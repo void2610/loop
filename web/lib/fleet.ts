@@ -126,7 +126,10 @@ async function peerFetchJson<T>(
     }
     throw new ApiError(res.status, detail);
   }
-  if (res.status === 204) return undefined as T;
+  // 202 Accepted / 204 No Content は body 空 → json.parse 失敗を避けるため未定義返し。
+  if (res.status === 204 || res.status === 202) return undefined as T;
+  // Content-Length: 0 の 200 も同様に未定義扱い(parse 例外を「送信失敗」と誤表示しない)。
+  if (res.headers.get("content-length") === "0") return undefined as T;
   return (await res.json()) as T;
 }
 
