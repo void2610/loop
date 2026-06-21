@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ from ..util import runner
 router = APIRouter(tags=["gen"])
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
+# stream.jsonl が この秒数以上更新されず gen.json も無ければ「kill された残骸」と判定する。
+_STALE_SECONDS = 30
 
 
 def _sse(event: str, data: Any) -> str:
@@ -45,6 +48,7 @@ def list_gens(limit: int = 30):
         ids = sorted((d.name for d in base.iterdir() if d.is_dir()), reverse=True)
     except OSError:
         ids = []
+    now = time.time()
     for gen_id in ids[:limit]:
         d = base / gen_id
         result: dict | None = None
@@ -54,12 +58,24 @@ def list_gens(limit: int = 30):
                 result = json.loads(rp.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 result = None
-        status = (result or {}).get("status") or "running"
+        if result:
+            status = result.get("status") or "fail"
+            task_id = result.get("task_id")
+            error = result.get("error")
+        else:
+            # gen.json なし → 実行中 or kill された残骸を mtime で判定する
+            sp = d / "author.stream.jsonl"
+            if sp.exists() and now - sp.stat().st_mtime <= _STALE_SECONDS:
+                status, task_id, error = "running", None, None
+            else:
+                age = int(now - sp.stat().st_mtime) if sp.exists() else None
+                status, task_id = "fail", None
+                error = f"aborted (no result, stream silent {age}s)" if age is not None else "aborted (no stream)"
         entries.append({
             "gen_id": gen_id,
             "status": status,
-            "task_id": (result or {}).get("task_id"),
-            "error": (result or {}).get("error"),
+            "task_id": task_id,
+            "error": error,
             # gen_id 命名規約 "YYYY-MM-DD-HHMMSS-gen" から started_at を導出。
             "started_at": gen_id[:17] if len(gen_id) >= 17 else None,
         })
@@ -119,6 +135,16 @@ async def stream_gen(request: Request, gen_id: str):
                     result = {"status": "fail", "error": "result_read_failed"}
                 yield _sse("end", {"gen_id": gen_id, "result": result})
                 return
+            # stream が一定時間更新なし = kill された残骸 → fail で end を出して終了
+            if sp.exists():
+                age = time.time() - sp.stat().st_mtime
+                if age > _STALE_SECONDS:
+                    yield _sse("end", {
+                        "gen_id": gen_id,
+                        "result": {"status": "fail", "task_id": None,
+                                   "error": f"aborted (no result, stream silent {int(age)}s)"},
+                    })
+                    return
             beat += 1
             yield _sse("heartbeat", {"t": beat})
             await asyncio.sleep(1)
