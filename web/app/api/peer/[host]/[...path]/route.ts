@@ -16,19 +16,25 @@ import { NextRequest } from "next/server";
 
 const SELF_BACKEND = process.env.API_BASE ?? "http://127.0.0.1:8765";
 
-let peersCache: Promise<Record<string, string>> | null = null;
+// 短時間 TTL キャッシュ。プロセス起動から永久に固めると loop.local.toml [fleet] の追加が反映されない
+// (実地で踏んだ: m1server を peers に足しても backend 再起動だけでは frontend 内の固定キャッシュが古い)。
+// backend は localhost なので 5 秒 TTL で十分(設定変更後ほぼ即時に反映、毎リクエスト fetch にはしない)。
+const PEERS_TTL_MS = 5000;
+let peersCache: { at: number; map: Promise<Record<string, string>> } | null = null;
 
 function getPeersMap(): Promise<Record<string, string>> {
-  if (peersCache) return peersCache;
-  peersCache = fetch(`${SELF_BACKEND}/api/fleet/peers`)
+  const now = Date.now();
+  if (peersCache && now - peersCache.at < PEERS_TTL_MS) return peersCache.map;
+  const p = fetch(`${SELF_BACKEND}/api/fleet/peers`, { cache: "no-store" })
     .then((r) => r.json())
     .then((data: { peers: { name: string; url: string }[] }) =>
       Object.fromEntries(data.peers.map((p) => [p.name, p.url.replace(/\/+$/, "")])));
-  // 失敗したらキャッシュをクリアして次回再試行可能に
-  peersCache.catch(() => {
+  // 失敗時は次回再試行できるよう cache をクリア
+  p.catch(() => {
     peersCache = null;
   });
-  return peersCache;
+  peersCache = { at: now, map: p };
+  return p;
 }
 
 async function proxy(req: NextRequest, host: string, path: string[]) {
