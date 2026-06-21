@@ -2236,6 +2236,10 @@ def cmd_continue(run_id: str, instructions: str) -> int:
 
     print(f"▶ continue: {run_id}(続行 #{cont_count})")
 
+    # 前 run の verdict(awaiting-merge 等)が残っていると active_runs が「最終」と判定して
+    # この続行 run を監視 UI から消す。続行が確定するまで verdict を一時的に外す。
+    _set_fm_key(md_path, "verdict", "running")
+
     repo = resolve_repo(task, cfg)
     if not is_git_repo(repo):
         print(f"  · repo 不正: {repo}", file=sys.stderr)
