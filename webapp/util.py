@@ -123,7 +123,10 @@ def reindex_and_query(verdict: str | None, reviewed: str | None, task: str | Non
         q += " AND reviewed=?"; params.append(int(reviewed))
     if task:
         q += " AND task LIKE ?"; params.append(f"%{task}%")
-    q += " ORDER BY started_at DESC, run_id DESC"
+    # run_id は `YYYY-MM-DD-HHMMSS-<task>` 形式で常に時系列順の文字列。
+    # started_at は YAML safe_load や continue で書式(T 区切り / 半角スペース)が
+    # 混在しうるため、これを基準にするとソートが崩れる。run_id を一次キーにする。
+    q += " ORDER BY run_id DESC"
     rows = [dict(r) for r in conn.execute(q, params).fetchall()]
     verdicts = [r[0] for r in conn.execute(
         "SELECT DISTINCT verdict FROM runs ORDER BY verdict").fetchall()]
@@ -137,7 +140,7 @@ def latest_runs() -> dict:
     try:
         conn = loopdb.connect(DB)
         for r in conn.execute(
-                "SELECT task, run_id, verdict FROM runs ORDER BY started_at DESC, run_id DESC"):
+                "SELECT task, run_id, verdict FROM runs ORDER BY run_id DESC"):
             last.setdefault(r["task"], {"run_id": r["run_id"], "verdict": r["verdict"]})
         conn.close()
     except Exception:

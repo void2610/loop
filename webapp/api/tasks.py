@@ -70,6 +70,18 @@ def list_tasks(include_archived: bool = False):
         tasks.append(schemas.TaskRow(
             id=tid, goal=t.get("goal"), status=t.get("status", "todo"),
             repo=t.get("repo"), archived=archived, last_run=last.get(tid)))
+    # 新しい順に並べる(最新 run があればその run_id を、無ければ task ファイルの mtime を見る)。
+    # 内部の parse_tasks 順は runner の dispatch 優先度として温存(これは API 表示のみの並び替え)。
+    def _ord_key(row: schemas.TaskRow) -> str:
+        lr = last.get(row.id)
+        if lr and lr.run_id:
+            return lr.run_id  # `YYYY-MM-DD-HHMMSS-...` で時系列キーになる
+        try:
+            mt = (runner.TASKS_DIR / f"{row.id}.md").stat().st_mtime
+            return f"mtime:{mt:020.6f}"
+        except OSError:
+            return ""
+    tasks.sort(key=_ord_key, reverse=True)
     return schemas.TaskListResponse(
         tasks=tasks, last=last,
         running=(runner.DATA / ".run.lock").exists(),
