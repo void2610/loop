@@ -15,6 +15,49 @@ from ._deps import err, valid_task_id
 router = APIRouter(tags=["tasks"])
 
 
+def _is_generating() -> bool:
+    """`.gen.lock` の中の gen_id を見て stale 判定し、残骸なら unlink する。
+    cmd_gen が SIGKILL されると finally の lock 解除が走らず残骸が残るため。"""
+    import json as _json
+    import time as _time
+
+    lock = runner.DATA / ".gen.lock"
+    if not lock.exists():
+        return False
+    try:
+        meta = _json.loads(lock.read_text(encoding="utf-8"))
+        gen_id = meta.get("gen_id") if isinstance(meta, dict) else None
+    except (OSError, _json.JSONDecodeError, ValueError):
+        gen_id = None
+    if not gen_id:
+        # 旧形式の lock(prompt のみ)。mtime で stale 判定
+        if _time.time() - lock.stat().st_mtime > 60:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+            return False
+        return True
+    gen_dir = runner.DATA / "gen" / gen_id
+    # gen.json が出ている = 完了済み(lock 残骸)
+    if (gen_dir / "gen.json").exists():
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+        return False
+    # stream が一定時間更新なし = kill された残骸
+    sp = gen_dir / "author.stream.jsonl"
+    silent = not sp.exists() or _time.time() - sp.stat().st_mtime > 30
+    if silent:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+        return False
+    return True
+
+
 @router.get("/tasks", response_model=schemas.TaskListResponse)
 def list_tasks(include_archived: bool = False):
     last = {k: schemas.LastRun(**v) for k, v in util.latest_runs().items()}
@@ -30,7 +73,7 @@ def list_tasks(include_archived: bool = False):
     return schemas.TaskListResponse(
         tasks=tasks, last=last,
         running=(runner.DATA / ".run.lock").exists(),
-        generating=(runner.DATA / ".gen.lock").exists())
+        generating=_is_generating())
 
 
 @router.get("/repos", response_model=schemas.ReposResponse)
