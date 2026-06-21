@@ -410,17 +410,6 @@ def evidence_flags(run_id: str) -> dict:
     return out
 
 
-def evidence_text(run_id: str) -> dict:
-    """証拠ファイル本文を JSON へ詰める。"""
-    d = RUNS / run_id
-    out: dict = {}
-    for name in ("change.patch", "test-output.txt"):
-        p = d / name
-        out[name] = p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
-    out["transcript"] = (d / "transcript.jsonl").exists()
-    return out
-
-
 def run_summary(text: str) -> str:
     """runs/<id>.md の `## エージェントがやったこと` を抽出(runner の事実要約。再要約しない)。"""
     if "## エージェントがやったこと" not in text:

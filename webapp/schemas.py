@@ -32,10 +32,6 @@ class RunListResponse(BaseModel):
     verdicts: list[str]
 
 
-class EvidenceFlags(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-
 class RunDetail(BaseModel):
     run_id: str
     front_matter: dict[str, Any]
@@ -54,15 +50,6 @@ class EvidenceFileMeta(BaseModel):
 
 class EvidenceMeta(BaseModel):
     files: list[EvidenceFileMeta]
-
-
-class TranscriptEvent(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    cls: str
-    label: str
-    body: str
-    ts: str
 
 
 class TranscriptResponse(BaseModel):

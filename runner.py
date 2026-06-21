@@ -26,6 +26,7 @@ import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -145,7 +146,7 @@ def update_status(task_id: str, new_status: str) -> None:
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _task_dumper():
+def _task_dumper() -> type[yaml.SafeDumper]:
     """multi-line 文字列を YAML リテラルブロック(|)で出力する SafeDumper。フォーム保存を読みやすく保つ。"""
     class _D(yaml.SafeDumper):
         pass
@@ -328,7 +329,7 @@ def render_verifier_prompt(task: dict, diff_text: str, test_output: str, brief: 
 
 # --- git / リポジトリ解決 ---
 
-def _repo_entry(value) -> tuple[str, str]:
+def _repo_entry(value: str | dict) -> tuple[str, str]:
     """[repos] の値(パス文字列 or {path, mode} テーブル)を (path, mode) に正規化する。
     mode 既定は 'parallel'(後方互換: 文字列指定は従来どおり worktree 並列)。"""
     if isinstance(value, dict):
@@ -929,58 +930,17 @@ def generate_task_stream(prompt: str, cfg: dict, repo_path: Path | None,
     return obj, None
 
 
-def generate_task(prompt: str, cfg: dict, repo_path: Path | None = None) -> dict | None:
-    """自然言語の依頼を専用 skill 付きで claude -p に渡し、目標契約を構造化出力で得る。
-    ファイルへの書き込みは行わない(backend が write_task で決定論的に書く)。
-    repo_path 指定時は、その repo 内を cwd にして read-only(Read/Grep/Glob)で実構成を調べさせ、
-    その repo で実際に exit 0 になる verify を書かせる(repo を見ずに当て推量させない)。"""
-    agents, loop = cfg["agents"], cfg["loop"]
-    model = agents.get("author_model") or agents["implementer_model"]
-    built = build_author_prompt(prompt, cfg, repo_path)
-    inspect = built["inspect"]
-    wrapped = built["wrapped"]
-    cmd = [
-        "claude", "-p", wrapped,
-        "--output-format", "json",
-        "--model", model,
-        # Unity 等 巨大ツリーの inspect でも turn を使い切らないよう余裕を持つ。
-        "--max-turns", "30" if inspect else "8",
-        "--max-budget-usd", str(loop["max_budget_usd"]),
-        "--permission-mode", loop.get("permission_mode", "default"),
-        "--allowedTools", "Read", "Grep", "Glob",  # 生成は read-only 調査のみ
-        "--disallowedTools", *WRITE_TOOLS,  # global settings の Write/Bash を上書きして read-only 強制
-        "--json-schema", json.dumps(TASK_GEN_SCHEMA, ensure_ascii=False),
-        "--plugin-dir", str(ROOT / ".claude" / "plugins" / "loop-roles"),
-    ]
-    cwd = str(repo_path) if inspect else str(ROOT)
-    try:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              timeout=loop["timeout_seconds"])
-        result = json.loads(proc.stdout)
-    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
-        print(f"  ! Author 失敗({type(e).__name__}):", e, file=sys.stderr)
-        if isinstance(e, json.JSONDecodeError):
-            print(f"  stdout 先頭: {(proc.stdout or '')[:500]!r}", file=sys.stderr)
-            print(f"  stderr 先頭: {(proc.stderr or '')[:500]!r}", file=sys.stderr)
-        return None
-    obj = result.get("structured_output")
-    if not isinstance(obj, dict):
-        # 構造化出力が空 → max-turns 到達 / モデル拒否 / scheme 不一致 を疑う(stop_reason / result を残す)
-        print(f"  ! Author 失敗(structured_output 空): stop_reason={result.get('stop_reason')!r}", file=sys.stderr)
-        print(f"  result 先頭: {json.dumps(result, ensure_ascii=False)[:500]}", file=sys.stderr)
-        return None
-    return obj
+def _safe_slug(raw: str, default: str) -> str:
+    """ファイル名・ID 用に英数._- 以外を - に畳む正規化(task_id / repo 名 共通)。"""
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "")).strip("-.") or default
 
 
 def _safe_task_id(raw: str) -> str:
-    import re
-    s = re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "")).strip("-.")
-    return s or "task"
+    return _safe_slug(raw, "task")
 
 
 def new_gen_id() -> str:
     """gen 用 ID(timestamp ベース)。runs と同じ命名規約を踏襲。"""
-    from datetime import datetime
     return datetime.now().strftime("%Y-%m-%d-%H%M%S-gen")
 
 
@@ -1173,8 +1133,7 @@ NORMS_ROOT = DATA / "repo"
 
 
 def _safe_repo_name(raw: str) -> str:
-    s = re.sub(r"[^A-Za-z0-9._-]+", "-", (raw or "")).strip("-.")
-    return s or "repo"
+    return _safe_slug(raw, "repo")
 
 
 def repo_norm_name(repo: Path, cfg: dict) -> str:
@@ -1344,7 +1303,7 @@ def _run_summary_for_norms(run_id: str, repo: Path) -> str:
 
 def draft_norm_candidates(run_id: str, repo: Path, cfg: dict, trigger: str) -> dict | None:
     """摩擦 run から規範候補を起草する(read-only・構造化出力)。ファイルは書かない。
-    backend(maybe_draft_norms)が candidates.md へ決定論的に追記する(generate_task と同じ分業)。"""
+    backend(maybe_draft_norms)が candidates.md へ決定論的に追記する(generate_task_stream と同じ分業)。"""
     loop, agents = cfg["loop"], cfg["agents"]
     model = agents.get("author_model") or agents["implementer_model"]
     summary = _run_summary_for_norms(run_id, repo)
@@ -1732,7 +1691,7 @@ def _gh(args: list[str], cwd: Path, timeout: int = 120) -> subprocess.CompletedP
     return subprocess.run(["gh", *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
 
 
-def _gh_json(args: list[str], cwd: Path, default):
+def _gh_json(args: list[str], cwd: Path, default: Any) -> Any:
     p = _gh(args, cwd)
     try:
         return json.loads(p.stdout) if p.stdout.strip() else default
