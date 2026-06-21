@@ -23,7 +23,8 @@ router = APIRouter(tags=["gen"])
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
 # stream.jsonl が この秒数以上更新されず gen.json も無ければ「kill された残骸」と判定する。
-_STALE_SECONDS = 30
+# Author が Explore sub-agent などで token を大量消費中は数十秒 silent もあるので余裕を持つ。
+_STALE_SECONDS = 180
 
 
 def _sse(event: str, data: Any) -> str:

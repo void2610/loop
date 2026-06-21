@@ -46,9 +46,9 @@ def _is_generating() -> bool:
         except OSError:
             pass
         return False
-    # stream が一定時間更新なし = kill された残骸
+    # stream が一定時間更新なし = kill された残骸(Author の長考も拾わないよう 3 分)
     sp = gen_dir / "author.stream.jsonl"
-    silent = not sp.exists() or _time.time() - sp.stat().st_mtime > 30
+    silent = not sp.exists() or _time.time() - sp.stat().st_mtime > 180
     if silent:
         try:
             lock.unlink()
