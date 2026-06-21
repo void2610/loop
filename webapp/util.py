@@ -146,9 +146,43 @@ def latest_runs() -> dict:
 
 
 def known_repos() -> list[str]:
+    """loop.toml [repos] の登録名。直近 run で使われたものを最新順に並べ、未使用は登録順で末尾。"""
     cfg = runner.load_config()
     names = list((cfg.get("repos") or {}).keys())
-    return names + ["none"]
+    # 登録名 → 絶対パスの逆引き(run MD の repo フィールドは絶対パスで入る)
+    import os
+    p2n: dict[str, str] = {}
+    for n, v in (cfg.get("repos") or {}).items():
+        path = v if isinstance(v, str) else (v.get("path") if isinstance(v, dict) else "")
+        if path:
+            p2n[os.path.abspath(os.path.expanduser(path))] = n
+    # loop.db の repo 列(絶対パス)から最新 started_at を集計
+    last_by_path = _repo_last_used()
+    last_by_name: dict[str, str] = {
+        n: ts for path, ts in last_by_path.items() for n in [p2n.get(path)] if n
+    }
+    used = sorted([n for n in names if last_by_name.get(n)], key=lambda n: last_by_name[n], reverse=True)
+    used_set = set(used)
+    unused = [n for n in names if n not in used_set]
+    return used + unused + ["none"]
+
+
+def _repo_last_used() -> dict[str, str]:
+    """loop.db から repo(絶対パス)→ 最新 started_at(ISO 文字列)。"""
+    import sqlite3
+    db_path = DATA / "loop.db"
+    if not db_path.exists():
+        return {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute(
+                "SELECT repo, MAX(started_at) FROM runs "
+                "WHERE repo IS NOT NULL AND repo != '' AND archived = 0 "
+                "GROUP BY repo"
+            ).fetchall()
+        return {r[0]: r[1] for r in rows if r[1]}
+    except sqlite3.Error:
+        return {}
 
 
 def repo_branches(repo: str | None) -> list[str]:
@@ -161,6 +195,18 @@ def repo_branches(repo: str | None) -> list[str]:
     if path is None:
         return []
     return runner.list_branches(path)
+
+
+def repo_default_branch(repo: str | None) -> str | None:
+    """repo 指定(登録名 / 'default' / パス)を解決してデフォルトブランチ名を返す。"""
+    r = (repo or "").strip()
+    if r.lower() == "none":
+        return None
+    cfg = runner.load_config()
+    path = runner.resolve_repo({} if r in ("", "default") else {"repo": r}, cfg)
+    if path is None:
+        return None
+    return runner.default_branch(path)
 
 
 def read_run_status(run_id: str | None = None) -> dict | None:

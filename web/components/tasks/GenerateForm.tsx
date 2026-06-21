@@ -27,15 +27,21 @@ export function GenerateForm({ repos }: { repos: string[] }) {
   const registered = repos.filter((r) => r.toLowerCase() !== "none");
 
   // 選択 repo のブランチ候補を取得(base_branch の datalist 用)。none/未選択は空。
+  // baseBranch が空なら API が返す default で初期化(repo を変えるたびに上書き)。
   useEffect(() => {
     if (!repo || repo.toLowerCase() === "none") {
       setBranches([]);
+      setBaseBranch("");
       return;
     }
     let live = true;
     api
       .repoBranches(repo)
-      .then((r) => live && setBranches(r.branches))
+      .then((r) => {
+        if (!live) return;
+        setBranches(r.branches);
+        if (r.default) setBaseBranch(r.default);
+      })
       .catch(() => live && setBranches([]));
     return () => {
       live = false;

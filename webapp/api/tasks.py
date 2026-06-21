@@ -40,7 +40,10 @@ def list_repos():
 
 @router.get("/repos/branches", response_model=schemas.BranchesResponse)
 def list_branches(repo: str = ""):
-    return schemas.BranchesResponse(branches=util.repo_branches(repo))
+    return schemas.BranchesResponse(
+        branches=util.repo_branches(repo),
+        default=util.repo_default_branch(repo),
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=schemas.TaskDetail)

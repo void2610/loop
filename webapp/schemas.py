@@ -118,6 +118,7 @@ class ReposResponse(BaseModel):
 
 class BranchesResponse(BaseModel):
     branches: list[str]
+    default: str | None = None  # remote/HEAD 由来のデフォルトブランチ(空 repo なら None)
 
 
 class QueueItem(BaseModel):

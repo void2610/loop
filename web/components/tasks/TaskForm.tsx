@@ -73,6 +73,7 @@ export function TaskForm({
   const statusOptions = statuses.length > 0 ? statuses : ["todo"];
 
   // 選択 repo のブランチ候補を取得(base_branch の datalist 用)。none は空、空欄=デフォルト repo。
+  // 新規作成時、baseBranch が空なら API の default で初期化する(既存編集時は initial を尊重)。
   useEffect(() => {
     if (repo.toLowerCase() === "none") {
       setBranches([]);
@@ -81,7 +82,11 @@ export function TaskForm({
     let live = true;
     api
       .repoBranches(repo)
-      .then((r) => live && setBranches(r.branches))
+      .then((r) => {
+        if (!live) return;
+        setBranches(r.branches);
+        if (r.default) setBaseBranch((prev) => prev || r.default!);
+      })
       .catch(() => live && setBranches([]));
     return () => {
       live = false;

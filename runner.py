@@ -365,6 +365,20 @@ def list_branches(repo: Path) -> list[str]:
     return names
 
 
+def default_branch(repo: Path) -> str | None:
+    """repo のデフォルトブランチ。origin/HEAD の symref を優先、無ければ現在の HEAD。"""
+    if not is_git_repo(repo):
+        return None
+    p = git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if p.returncode == 0 and p.stdout.strip():
+        s = p.stdout.strip()
+        return s[len("origin/"):] if s.startswith("origin/") else s
+    p = git(repo, "symbolic-ref", "--short", "HEAD")
+    if p.returncode == 0 and p.stdout.strip():
+        return p.stdout.strip()
+    return None
+
+
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
 

@@ -603,6 +603,8 @@ export interface components {
         BranchesResponse: {
             /** Branches */
             branches: string[];
+            /** Default */
+            default?: string | null;
         };
         /**
          * ConventionsInput
