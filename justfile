@@ -5,12 +5,6 @@
 run:
     uv run runner.py run
 
-# バックエンドの契約テスト(API 契約 + loop.db 不変条件 + run ループ全経路)。リファクタの安全網。
-test:
-    uv run tests/test_api_contract.py
-    uv run tests/test_loopdb.py
-    uv run tests/test_verify_loop.py
-
 # バックエンド(FastAPI: /api + SSE)のみ起動。:8765
 web:
     uv run webapp/main.py
@@ -109,9 +103,12 @@ stats-sql sql:
 status:
     uv run runner.py status
 
-# API 契約テスト(inline script deps で webapp を 3.12 ピン実行。隔離 git repo で副作用を閉じる)
+# 契約テスト(API 契約 + loop.db 不変条件 + run ループ全経路)。リファクタの安全網。
+# inline script deps で webapp を 3.12 ピン実行。隔離 git repo / tmp で副作用を閉じる。
 test:
     uv run tests/test_api_contract.py
+    uv run tests/test_loopdb.py
+    uv run tests/test_verify_loop.py
 
 # 契約データの private repo を初期化(公開エンジンを clone した直後に1回)
 init-data:
