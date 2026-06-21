@@ -2242,6 +2242,13 @@ def cmd_continue(run_id: str, instructions: str) -> int:
 
     print(f"▶ continue: {run_id}(続行 #{cont_count})")
 
+    # 前回の stop マーカーが残っていると新 subprocess の watcher が起動 0.5 秒で kill する。
+    # 続行を始める時点で「以前の停止指示は処理済み」とみなして削除する。
+    try:
+        (run_dir / "stop").unlink(missing_ok=True)
+    except OSError:
+        pass
+
     # 中断境界 + 追加指示が transcript で見える(TranscriptEventView が type を理解する)。
     marker = {"type": "continuation", "continue_count": cont_count,
               "at": now_iso, "instructions": instructions}
