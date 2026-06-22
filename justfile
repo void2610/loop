@@ -52,6 +52,8 @@ app: web-build
         echo "✗ :3000/:8765 がまだ使用中です。残存プロセスを手動で停止してください" >&2
         exit 1
     fi
+    # 知識バンドルの橋渡しリンク Knowledge/private を host 固有 data-dir に張り替える(§6.4b・起動不変条件)。
+    uv run runner.py knowledge-link || true
     # tailscaled を前段に(ALF 回避)。--bg は非同期 + 冪等で、失敗しても script は止まらないため
     # 直後に `tailscale serve status` で設定反映を検証する(これが無いと「画面は出るが API が 403」になる)
     # :3000 は Next フロント、:8765 は backend(他 PC のブラウザから EventSource で SSE を直接購読)。
@@ -87,6 +89,15 @@ app: web-build
         sleep 0.3
     done
     HOSTNAME=127.0.0.1 PORT=3000 node web/.next/standalone/server.js
+
+# 知識バンドルの橋渡しリンク Knowledge/private -> <data-dir>/Knowledge を張る(§6.4b)。setup 時に 1 回 + just app が毎回実行。
+knowledge-link:
+    uv run runner.py knowledge-link
+
+# loop外セッションの知識更新を 2 repo 分離を守って commit(§6.4c)。engine は自動 push しない。
+# 例: just knowledge-commit Knowledge/traps/foo.md Knowledge/private/learnings/bar.md
+knowledge-commit *paths:
+    uv run runner.py knowledge-commit {{paths}}
 
 # loop.db を破棄し runs/*.md から完全再生成(ビューは捨ててよい)
 reindex:

@@ -70,3 +70,9 @@ verifier_tools    = ["Read", "Grep", "Glob"]
 # 契約データ(TODO.md / runs/ / review-notes.md / loop.db)の置き場。
 # エンジン(公開 repo)とは別の private git repo にする。エンジン側は data/ を .gitignore する。
 dir = "data"
+
+[knowledge]
+# OKF 知識バンドルのルート(複数可)。runner が Author/Implementer に読ませる入口(§6)。
+# 相対パスは loop engine root(= anchor)基準で絶対化。<data-dir> は [data].dir に展開する。
+# engine 公開知識 + data 非公開知識を両方指す。未指定なら同等の 2 バンドルにフォールバック。
+bundles = ["Knowledge", "<data-dir>/Knowledge"]

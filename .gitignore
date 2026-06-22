@@ -5,6 +5,8 @@ __pycache__/
 .loop-worktrees/
 # 契約データは別の private git repo(エンジン=公開 repo には含めない)
 data/
+# 非公開知識バンドルへの橋渡しリンク(data repo を指す symlink)。public 履歴に絶対入れない(§6.4)
+Knowledge/private
 # 認証情報(平文トークン/秘密鍵)と監査ログは公開 repo に含めない(§7.4 / §7.7)
 auth.toml
 logs/

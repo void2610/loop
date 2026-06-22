@@ -1,0 +1,3 @@
+[submodule "Knowledge/conventions"]
+	path = Knowledge/conventions
+	url = https://github.com/void2610/okf-conventions.git
